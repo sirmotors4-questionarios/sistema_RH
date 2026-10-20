@@ -8,6 +8,8 @@ const mockEmployees = [
 ];
 const labels={dashboard:"Visão geral",colaboradores:"Colaboradores",contratos:"Contratos",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
 function go(page){
+ if(page==="configuracoes"){window.location.href="configuracoes.html";return;}
+
  if(!Object.hasOwn(labels,page))return;
  document.querySelectorAll(".page").forEach(el=>el.classList.toggle("active",el.id===page));
  document.querySelectorAll("[data-page]").forEach(el=>el.classList.toggle("active",el.dataset.page===page));
