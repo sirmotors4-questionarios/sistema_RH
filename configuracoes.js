@@ -1,3 +1,4 @@
+import {evaluateFormula} from "./rh-engine.js";
 "use strict";
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const nav=$$(".config-nav");
@@ -17,18 +18,7 @@ addScale();dirty=false;$("#dirty").textContent="Sem alterações";
 const library=$("#formula-library"),custom=$("#formula-custom");
 library.addEventListener("change",()=>{custom.disabled=library.value!=="custom";if(custom.disabled)custom.value="";});
 function get(name){return Number($('[data-param="'+name+'"]').value)}
-function tokenize(s){
- const tokens=s.match(/\s*(?:\d+(?:\.\d+)?|[A-Za-z][A-Za-z0-9]*|[()+*/-])\s*/g);
- if(!tokens||tokens.join("").replace(/\s/g,"")!==s.replace(/\s/g,""))throw Error("Expressão contém caracteres não permitidos.");
- return tokens.map(t=>t.trim());
-}
-function evaluate(expression,vars){
- const tok=tokenize(expression);let i=0;
- function factor(){const t=tok[i++];if(t==="+")return factor();if(t==="-")return -factor();if(t==="("){const v=expr();if(tok[i++]!==")")throw Error("Parênteses incompletos.");return v}if(/^\d+(\.\d+)?$/.test(t||""))return Number(t);if(Object.prototype.hasOwnProperty.call(vars,t))return vars[t];throw Error("Variável ou símbolo inválido: "+String(t))}
- function term(){let x=factor();while(tok[i]==="*"||tok[i]==="/"){let op=tok[i++],y=factor();if(op==="/"&&y===0)throw Error("Divisão por zero.");x=op==="*"?x*y:x/y}return x}
- function expr(){let x=term();while(tok[i]==="+"||tok[i]==="-"){let op=tok[i++],y=term();x=op==="+"?x+y:x-y}return x}
- const x=expr();if(i!==tok.length||!Number.isFinite(x))throw Error("Expressão inválida.");return x;
-}
+function evaluate(expression,vars){return evaluateFormula(expression,vars);}
 function simulate(){const target=$("#sim-result");try{
  const base=Number($("#sim-base").value),liquido=Number($("#sim-liquido").value),diasMes=get("diasMes"),horasMes=get("horasMes"),horasDia=get("horasDia");
  if([base,liquido,diasMes,horasMes,horasDia].some(v=>!Number.isFinite(v))||base<0||liquido<0||diasMes<=0||horasMes<=0||horasDia<=0)throw Error("Informe valores numéricos válidos e divisores positivos.");
