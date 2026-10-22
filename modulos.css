@@ -1,0 +1,38 @@
+/* Estado da ligação e páginas dos módulos com dados do Excel (só leitura). */
+[hidden]{display:none!important}
+.outline.small{padding:7px 12px;font-size:12px}
+.top-right{gap:10px}
+.demo-dot.live{background:#2e9d5b;box-shadow:0 0 0 4px #2e9d5b1f}
+.demo-dot.error{background:#c8323f;box-shadow:0 0 0 4px #c8323f1f}
+.status-pill.live{background:#ebf8ee;color:#23744a;border-color:#c5ead0}
+.status-pill.error{background:#fff2f2;color:#a32b36;border-color:#f2c5c5}
+.notice.live{background:#ebf8ee;border-color:#c5ead0;color:#23744a}
+.notice.error{background:#fff2f2;border-color:#f2c5c5;color:#a32b36}
+.source-note{font-size:11px;color:#8b98a7;margin:12px 2px}
+.source-note:empty{display:none}
+.compact-stats .metric{min-height:110px;padding:18px}
+.compact-stats .metric strong{font-size:22px}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.loading,td.no-data{color:#8b98a7;text-align:center;padding:28px}
+[data-loaded] table+table{margin-top:18px}
+@media(max-width:800px){#signin,#signout{padding:6px 9px;font-size:11px}}
+.grid-two[data-loaded] table{min-width:0}
+.grid-two[data-loaded] th,.grid-two[data-loaded] td{padding:12px 14px}
+th.num{text-align:right}
+.primary.small{padding:7px 14px;font-size:12px;width:auto}
+dialog#access-dialog{border:0;border-radius:14px;padding:0;width:min(460px,calc(100vw - 32px));box-shadow:0 20px 60px #0f1b2a40;color:#293a4c}
+dialog#access-dialog::backdrop{background:#0f1b2a80}
+#access-form{padding:26px 26px 20px;display:flex;flex-direction:column;gap:14px}
+#access-form h2{margin:0;font-size:20px}
+#access-form label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:700;color:#4c5c6c}
+#access-form input{border:1px solid #dce3eb;border-radius:8px;padding:11px 12px;font-size:14px;min-height:42px}
+#access-form input:focus{outline:2px solid #be253733;border-color:#be2537}
+.form-error{color:#a32b36;font-size:12px;margin:0;min-height:1em}
+.form-error:empty{display:none}
+.dialog-actions{display:flex;align-items:center;gap:10px}
+.dialog-actions span{flex:1}
+.link-btn{border:0;background:none;color:#7a8896;font-size:11px;text-decoration:underline;padding:0;cursor:pointer}
+.key-help summary{cursor:pointer;font-size:12px;color:#596678;font-weight:650}
+.key-out{display:block;margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;background:#f6f9fc;border:1px solid #e4ebf3;border-radius:6px;padding:8px}
+.key-out:empty{display:none}
+@media(max-width:560px){.dialog-actions{flex-wrap:wrap}.dialog-actions span{display:none}}
