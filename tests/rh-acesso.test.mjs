@@ -52,3 +52,17 @@ test('callApi com credenciais: sem Authorization, envia email+chave; 403 com men
   await assert.rejects(callApi('ferias', {credenciais, url: URL_OK, fetchImpl: proibido}), e => e.code === 'RH_FORBIDDEN' && /código de acesso/.test(e.message) && !/a@b\.co/.test(e.message));
   await assert.rejects(callApi('ferias', {credenciais: {email: 'a@b.co'}, url: URL_OK, fetchImpl: ok}), e => e.code === 'RH_AUTH');
 });
+
+test('params vão no corpo sem substituir acção; configuracoes aceita formato {tabelas:[…]}', async () => {
+  const {loadConfiguracoes} = await import('../rh-api.js');
+  let corpo;
+  const tabelas = ['tbl_configuracoes_RH', 'tbl_escaloes_RH', 'tbl_formulas_RH', 'tbl_auditoria_RH'].map(t => ({tabela: t, linhas: []}));
+  const f = async (url, init) => { corpo = JSON.parse(init.body); return {status: 200, ok: true, json: async () => ({ok: true, utilizador: {Perfil: 'Superadministrador'}, tabelas})}; };
+  const credenciais = {email: 'a@b.co', chave: 'f'.repeat(64)};
+  await callApi('lancamentos', {credenciais, url: URL_OK, fetchImpl: f, params: {ano: 2026, mes: 10, action: 'hack', chave: 'x'}});
+  assert.deepEqual(corpo, {ano: 2026, mes: 10, action: 'lancamentos', email: 'a@b.co', chave: 'f'.repeat(64)});
+  const r = await loadConfiguracoes({credenciais, url: URL_OK, fetchImpl: f});
+  assert.equal(corpo.action, 'configuracoes');
+  assert.deepEqual(Object.keys(r.tables).sort(), ['tbl_auditoria_RH', 'tbl_configuracoes_RH', 'tbl_escaloes_RH', 'tbl_formulas_RH']);
+  assert.equal(r.utilizador.aprovar, true);
+});

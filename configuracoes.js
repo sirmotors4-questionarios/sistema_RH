@@ -2,6 +2,7 @@ import {evaluateFormula} from "./rh-engine.js";
 import {readTables, resolveTables, simulateRecord} from "./rh-data.js";
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
 import {loadConfiguracoes} from "./rh-api.js";
+import {sessaoAcesso, urlGuardada, sairAcesso} from "./rh-acesso.js";
 "use strict";
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const nav=$$(".config-nav");
@@ -104,13 +105,15 @@ level.addEventListener("change",refreshSource);
 function authView(state,message){
  const bar=$("#auth-bar");bar.classList.toggle("ok",state==="ok");bar.classList.toggle("error",state==="error");
  $("#auth-status").textContent=message;
- const signed=Boolean(currentAccount());
- $("#signin").hidden=signed||!authConfigured();$("#signout").hidden=!signed;$("#load-remote").hidden=!signed;
+ const codigo=Boolean(sessaoAcesso()&&urlGuardada()),signed=Boolean(currentAccount())||codigo;
+ $("#signin").hidden=signed||!authConfigured();$("#code-signin").hidden=signed;$("#signout").hidden=!signed;$("#load-remote").hidden=!signed;
 }
+// Acesso por código pessoal (sessão iniciada na página principal, no mesmo separador).
+function deps(){const s=sessaoAcesso(),url=urlGuardada();return s&&url?{credenciais:s,url}:{getToken}}
 async function loadRemote(){
  const button=$("#load-remote");button.disabled=true;authView("","A carregar as configurações do Excel através do Power Automate…");
  try{
-  const result=await loadConfiguracoes({getToken});
+  const result=await loadConfiguracoes(deps());
   utilizador=result.utilizador;
   applyTables(result.tables,"Fonte: Excel no SharePoint via Power Automate ("+new Date().toLocaleTimeString("pt-MZ")+").");
   $("#integration-badge").textContent="Motor ligado · Power Automate";
@@ -121,10 +124,12 @@ async function loadRemote(){
  }finally{button.disabled=false;}
 }
 $("#signin").addEventListener("click",()=>signIn().catch(e=>authView("error",e.message)));
-$("#signout").addEventListener("click",()=>signOut().catch(e=>authView("error",e.message)));
+$("#signout").addEventListener("click",()=>{if(sessaoAcesso()){sairAcesso();location.reload();return}signOut().catch(e=>authView("error",e.message))});
 $("#load-remote").addEventListener("click",loadRemote);
 (async()=>{
- if(!authConfigured()){authView("","Ligação Microsoft ainda não configurada nesta versão. Use o ficheiro JSON para testar.");return}
+ const s=sessaoAcesso();
+ if(s&&urlGuardada()){authView("","Sessão iniciada: "+s.email+".");await loadRemote();return}
+ if(!authConfigured()){authView("","Sessão não iniciada. Carregue em «Entrar» para usar o seu código de acesso, ou use o ficheiro JSON para testar.");return}
  try{
   await initAuth();
   const account=currentAccount();
