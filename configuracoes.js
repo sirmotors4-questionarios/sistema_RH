@@ -1,5 +1,7 @@
 import {evaluateFormula} from "./rh-engine.js";
 import {readTables, resolveTables, simulateRecord} from "./rh-data.js";
+import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
+import {loadConfiguracoes} from "./rh-api.js";
 "use strict";
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const nav=$$(".config-nav");
@@ -10,7 +12,7 @@ function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("show");cl
 const level=$("#scope-level");
 function scope(){let n=["geral","empresa","categoria","colaborador"].indexOf(level.value);["#company","#category","#employee"].forEach((s,i)=>{$(s).disabled=n<i+1; if(n<i+1)$(s).value=""});}
 level.addEventListener("change",scope);scope();
-let tables=null, sourceError="";
+let tables=null, sourceError="", sourceLabel="", utilizador=null;
 let dirty=false;function markDirty(){dirty=true;$("#dirty").textContent="Alterações por validar";$("#dirty").style.background="#fff1dc";$("#dirty").style.color="#926320";$("#sim-result").dataset.validated="false"}
 $$(".config-work input,.config-work select").forEach(el=>el.addEventListener("input",markDirty));
 const scales=$("#scales-body");
@@ -50,6 +52,7 @@ function simulate(){const target=$("#sim-result");try{
 $("#simulate").addEventListener("click",simulate);
 function reset(){location.reload()}$("#reset").addEventListener("click",reset);
 $("#propose").addEventListener("click",()=>{
+ if(utilizador&&!utilizador.propor){toast("O seu perfil ("+utilizador.perfil+") permite consultar, mas não propor alterações.");return}
  const since=$("#vigencia").value,reason=$("#justificacao").value.trim();
  if(!since){section("geral");toast("Indique a data de vigência.");return}
  if(!reason){section("geral");toast("Introduza uma justificação.");return}
@@ -69,19 +72,16 @@ function refreshSource(){
   resolved.formulas.forEach(r=>{const option=document.createElement("option");option.value=r.Codigo_Formula;option.textContent=r.Codigo_Formula+" — "+r.Expressao;library.append(option);});
   custom.disabled=true;custom.value="";
   sourceError="";$("#simulate").disabled=!resolved.formulas.length;
-  $("#source-status").textContent="Tabelas carregadas nesta sessão. "+resolved.parameters.length+" parâmetros resolvidos; "+resolved.formulas.length+" fórmulas disponíveis; "+resolved.unavailable.length+" não validadas. Excel/Power Automate não ligado.";
+  $("#source-status").textContent="Tabelas carregadas nesta sessão. "+resolved.parameters.length+" parâmetros resolvidos; "+resolved.formulas.length+" fórmulas disponíveis; "+resolved.unavailable.length+" não validadas. "+(sourceLabel||"Excel/Power Automate não ligado.");
  }catch(error){sourceError=error.message;$("#source-status").textContent="Erro nas tabelas: "+error.message;$("#simulate").disabled=true;}
 }
 $("#reference-date").value=new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Maputo'});
 ["#scope-level","#company","#category","#employee","#reference-date"].forEach(selector=>$(selector).addEventListener("input",refreshSource));
 $("#reference-date").addEventListener("change",()=>{$("#sim-result").dataset.validated="false";refreshSource();});
 $("#sim-variables").addEventListener("input",markDirty);
-$("#tables-file").addEventListener("change",async event=>{
- const file=event.target.files[0];if(!file)return;
+function applyTables(parsed,label){
  try{
-  if(file.size>5*1024*1024)throw Error("O ficheiro excede o limite de 5 MB.");
-  const parsed=readTables(JSON.parse(await file.text()));
-  tables=parsed;
+  tables=parsed;sourceLabel=label;
   $$("[data-param], #scales-body input, #add-scale").forEach(el=>el.disabled=true);
   refreshSource();
   const body=$("#audit-body");body.replaceChildren();
@@ -89,6 +89,46 @@ $("#tables-file").addEventListener("change",async event=>{
   if(!tables.tbl_auditoria_RH.length)rowCells(body,["Sem eventos de auditoria importados."]);
   $("#sim-result").textContent="Seleccione a fórmula e indique as variáveis necessárias. Não é executado processamento salarial completo.";
  }catch(error){sourceError=error.message;$("#source-status").textContent="Não foi possível carregar: "+error.message;$("#simulate").disabled=true;$("#sim-result").dataset.validated="false";}
+}
+$("#tables-file").addEventListener("change",async event=>{
+ const file=event.target.files[0];if(!file)return;
+ try{
+  if(file.size>5*1024*1024)throw Error("O ficheiro excede o limite de 5 MB.");
+  applyTables(readTables(JSON.parse(await file.text())),"Fonte: ficheiro JSON importado nesta sessão.");
+ }catch(error){sourceError=error.message;$("#source-status").textContent="Não foi possível carregar: "+error.message;$("#simulate").disabled=true;}
 });
 
 level.addEventListener("change",refreshSource);
+
+// Ligação autenticada: Microsoft Entra -> Power Automate (RH_GET_Configuracoes) -> Gestão de Colaboradores.xlsx
+function authView(state,message){
+ const bar=$("#auth-bar");bar.classList.toggle("ok",state==="ok");bar.classList.toggle("error",state==="error");
+ $("#auth-status").textContent=message;
+ const signed=Boolean(currentAccount());
+ $("#signin").hidden=signed||!authConfigured();$("#signout").hidden=!signed;$("#load-remote").hidden=!signed;
+}
+async function loadRemote(){
+ const button=$("#load-remote");button.disabled=true;authView("","A carregar as configurações do Excel através do Power Automate…");
+ try{
+  const result=await loadConfiguracoes({getToken});
+  utilizador=result.utilizador;
+  applyTables(result.tables,"Fonte: Excel no SharePoint via Power Automate ("+new Date().toLocaleTimeString("pt-MZ")+").");
+  $("#integration-badge").textContent="Motor ligado · Power Automate";
+  $("#propose").disabled=!utilizador.propor;
+  authView("ok",(utilizador.nome||utilizador.email)+" · Perfil: "+utilizador.perfil+(utilizador.propor?"":" (apenas consulta)")+". Configurações carregadas.");
+ }catch(error){
+  utilizador=null;authView("error",error.message);
+ }finally{button.disabled=false;}
+}
+$("#signin").addEventListener("click",()=>signIn().catch(e=>authView("error",e.message)));
+$("#signout").addEventListener("click",()=>signOut().catch(e=>authView("error",e.message)));
+$("#load-remote").addEventListener("click",loadRemote);
+(async()=>{
+ if(!authConfigured()){authView("","Ligação Microsoft ainda não configurada nesta versão. Use o ficheiro JSON para testar.");return}
+ try{
+  await initAuth();
+  const account=currentAccount();
+  if(account){authView("","Sessão iniciada: "+account.username+".");await loadRemote();}
+  else authView("","Inicie sessão com a conta Microsoft da SIR para carregar as configurações reais.");
+ }catch(error){authView("error",error.message);}
+})();

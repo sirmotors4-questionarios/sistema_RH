@@ -3,12 +3,12 @@
 Aplicação Web para gestão de colaboradores, contratos, adendas, lançamentos salariais, férias e relatórios.
 
 ## Estado
-**Protótipo de interface sem dados reais.** Não está conectado ao Power Automate, Excel no SharePoint ou autenticação. O modo demonstração contém apenas registos fictícios. Nenhuma informação salarial ou pessoal deve ser publicada neste repositório.
+**Configurações ligadas ao Excel no SharePoint através do Power Automate, com autenticação Microsoft.** Os restantes módulos (colaboradores, salários, férias…) continuam em modo demonstração com registos fictícios. Nenhuma informação salarial ou pessoal deve ser publicada neste repositório.
 
 ## Arquitectura escolhida
 - Interface: HTML, CSS, JavaScript (GitHub Pages).
-- Armazenamento: ficheiro Excel `Gestão de Colaoradores.xlsm` existente no SharePoint.
-- Camada de integração: Power Automate; os fluxos e respectivas URLs ainda têm de ser configurados.
+- Armazenamento: `Gestão de Colaboradores.xlsx` no SharePoint (SIR MOTORS INTERNATIONAL › Documentos › General › Recursos Humanos › Sistema › Ficheiro). O `.xlsm` com VBA continua a ser o sistema actual; o conector Excel do Power Automate só lê `.xlsx`/`.xlsb`.
+- Camada de integração: Power Automate (fluxo `RH_GET_Configuracoes`, accionador HTTP restrito a "Any user in my tenant").
 - Autorização: requer mecanismo autenticado e um intermediário seguro. **Não publicar URLs de fluxos com segredo, tokens ou credenciais no código do GitHub Pages.**
 - Lógica: migração progressiva das regras VBA, validando equivalência de resultados antes de activar gravações.
 
@@ -54,3 +54,21 @@ O ficheiro JSON é lido em memória no navegador, até recarregar a página. Nã
 
 ### Verificação
 Executar `node --test tests/rh-integration.test.mjs`. Os testes cobrem âmbito, vigência, fórmulas não validadas, parâmetros efectivos, IF, arredondamentos, calendário e bloqueio de escalões sobrepostos.
+
+
+## Ligação ao Power Automate e autenticação
+```
+Browser (GitHub Pages) --MSAL / Microsoft Entra--> token (aud https://service.flow.microsoft.com/)
+   └─ POST {"action":"configuracoes"} + Bearer token --> fluxo RH_GET_Configuracoes
+        ├─ Utilizador  = e-mail do token (cabeçalhos x-ms-user-*-encoded)
+        ├─ Ler_Utilizadores (tbl_utilizadores_RH, filtro Email eq …)
+        ├─ Ler_Configuracoes / Ler_Escaloes / Ler_Formulas / Ler_Auditoria
+        └─ Response: 200 {ok, utilizador, 4 tabelas} | 403 {ok:false, erro, email}
+```
+- **Sem token o fluxo responde 401** (`DirectApiAuthorizationRequired`). O URL em `rh-config.js` não contém assinatura nem segredo.
+- **Permissões:** o fluxo só devolve dados a contas registadas e `Activo` em `tbl_utilizadores_RH` (folha UTILIZADORES_RH: ID_Utilizador, Nome, Email, Perfil, Empresa, Estado). Perfis: Superadministrador, Administrador RH, Técnico RH, Gestor. A interface usa o perfil apenas para orientar (ex.: desactivar "Propor"); as futuras gravações terão de validar o perfil no fluxo.
+- **Registo no Entra:** aplicação "Sistema RH Web" (single-tenant, plataforma SPA) com os redirect URIs das páginas (`…/sistema_RH/`, `…/sistema_RH/index.html`, `…/sistema_RH/configuracoes.html` e `http://localhost:8000/configuracoes.html` para testes) e a permissão delegada **Power Automate › User**. O `clientId` é público e vai em `rh-config.js`.
+- MSAL 4.30.0 (LTS) é carregado de jsDelivr com `integrity` (SRI). A sessão fica em `sessionStorage`.
+
+### Verificação
+`node --test tests/rh-integration.test.mjs tests/rh-api.test.mjs`
