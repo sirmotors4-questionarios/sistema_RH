@@ -52,6 +52,24 @@ As datas podem ser ISO ou números de série Excel. Valores de taxa como `0.03` 
 
 O ficheiro JSON é lido em memória no navegador, até recarregar a página. Não publique dados reais no GitHub. A futura API autenticada poderá entregar o mesmo objecto a `readTables`; nenhum endpoint Power Automate foi configurado nesta alteração.
 
+### Fluxo de consulta dos módulos (RH_API_Consultar)
+`POST {"action": "funcionarios" | "contratos" | "lancamentos" | "ferias"}` com o mesmo token. O fluxo confirma o utilizador em `tbl_utilizadores_RH`, lê as tabelas do módulo (paginação até 5000 linhas) e responde `200 {ok, utilizador, action, tabelas:[{tabela, linhas}]}`, `403` (conta não autorizada) ou `400` (acção inválida). Só leitura.
+
+Tabelas confirmadas no ficheiro Gestão de Colaboradores.xlsx (teste de 22/10/2026; contagens indicativas):
+
+| Módulo | Tabela | Linhas | Colunas principais |
+|---|---|---|---|
+| funcionarios | tbl_funcionarios | 461 | Codigo, Nome, Departamento, Empresa, Estado, Profissao, Categoria, TipoContrato, Data Admissao, Vencimento Base, RegimePagamento, … (51 colunas) |
+| contratos | tbl_adendas | 286 | ID_Adenda, Codigo, Nome, Numero_Adenda, Data_Adenda, Data_Inicio_Vigencia, Data_Fim_Vigencia, Campo_Alterado, Valor_Anterior, Valor_Novo, Estado_Adenda, Aplicada, … |
+| contratos | tbl_parametros_pagamento | 4 | ID_Parametro, RegimePagamento, Categoria, Valor_Unitario, Unidade, Vigencia_Inicio, Vigencia_Fim, Activo |
+| lancamentos | tbl_lançamento | 1805 | ID_Lancamento, Codigo, Nome, Ano, Mês, Dias Trabalhados, Horas Extras, Subsídios, Total de Acréscimos, Total de Descontos, IRPS, Salario Liquido, Estado do Lançamento, … |
+| lancamentos | Table1 (escalões IRPS) | 10 | Limite Inferior, Limite Superior, 0, 1, 2, 3, 4 ou mais, Coeficiente adicional |
+| lancamentos | tbl_arredondamento | 4 | Empresa, Casas_INSS, Casas_IRPS |
+| ferias | tbl_ferias | 0 | (tabela vazia; colunas por confirmar quando houver registos) |
+| ferias | tbl_feriados | 9 | Dia, Mes, Feriado |
+
+Os nomes chegam exactamente como os cabeçalhos do Excel, **incluindo espaços e acentos** (ex.: `Vencimento Base`, `Data de Saída`, `Mês`). Cada linha traz também `ItemInternalId` e `@odata.etag`, que o site deve ignorar.
+
 ### Verificação
 Executar `node --test tests/rh-integration.test.mjs`. Os testes cobrem âmbito, vigência, fórmulas não validadas, parâmetros efectivos, IF, arredondamentos, calendário e bloqueio de escalões sobrepostos.
 
