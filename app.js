@@ -1,6 +1,6 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
-import {loadModulo} from "./rh-api.js";
-import {urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
+import {loadModulo, gravarColaborador} from "./rh-api.js";
+import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 "use strict";
 
@@ -19,7 +19,7 @@ const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],col
 
 const dados={};          // módulo -> {tabelas, carregado}
 const pedidos={};        // módulo -> Promise em curso
-let ligado=false, paginaActual="dashboard";
+let ligado=false, paginaActual="dashboard", utilizadorActual=null;
 
 function go(page){
  if(page==="configuracoes"){window.location.href="configuracoes.html";return;}
@@ -36,7 +36,7 @@ document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click"
 document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go)));
 $("menu-toggle").addEventListener("click",()=>$("sidebar").classList.toggle("open"));
 function showToast(message){const t=$("toast");t.textContent=message;t.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>t.classList.remove("show"),4500)}
-document.querySelectorAll("[data-action]").forEach(el=>el.addEventListener("click",()=>showToast("Registo de alterações ainda não activado: a gravação com aprovação (RH_API_Actualizar) é a próxima fase.")));
+document.querySelectorAll("[data-action]").forEach(el=>el.addEventListener("click",()=>showToast("Gravação ainda não activada neste módulo. Já disponível: criar e editar colaboradores.")));
 
 // ---------- utilitários de tabela ----------
 function cell(row,value,opts={}){const td=document.createElement("td");if(opts.num)td.className="num";const node=document.createElement(opts.strong?"strong":"span");node.textContent=value??"";td.append(node);row.append(td);return td}
@@ -113,7 +113,8 @@ function renderEmployees(){
  const tbody=$("employees-body");tbody.replaceChildren();
  if(!result.length)emptyRow(tbody,7,"Nenhum colaborador corresponde aos filtros.");
  result.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.regime);stateCell(tr,e.estado);
-  const td=document.createElement("td"),btn=document.createElement("button");btn.className="inline-btn";btn.textContent="Consultar";btn.addEventListener("click",()=>showToast(e.nome+" · "+[e.categoria||e.profissao,e.contrato,e.admissao?"admitido em "+M.formatarData(e.admissao):""].filter(Boolean).join(" · ")));td.append(btn);tr.append(td);tbody.append(tr)});
+  const td=document.createElement("td"),btn=document.createElement("button");btn.className="inline-btn";btn.textContent="Consultar";btn.addEventListener("click",()=>showToast(e.nome+" · "+[e.categoria||e.profissao,e.contrato,e.admissao?"admitido em "+M.formatarData(e.admissao):""].filter(Boolean).join(" · ")));td.append(btn);
+  if(dados.funcionarios&&podeGravar()){const ed=document.createElement("button");ed.className="inline-btn";ed.type="button";ed.textContent="Editar";ed.addEventListener("click",()=>abrirColaborador("editar",e.codigo));td.append(ed)}tr.append(td);tbody.append(tr)});
  $("employee-count").textContent=dados.funcionarios
   ?result.length+" de "+lista.length+" colaborador(es)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS+", refine a pesquisa":"")
   :result.length+" registo(s) demonstrativo(s)";
@@ -204,6 +205,7 @@ function estadoLigacao(tipo,titulo,texto){
  $("notice-title").textContent=titulo;$("notice-text").textContent=texto;
 }
 function mostrarUtilizador(u){
+ utilizadorActual=u;
  $("avatar").textContent=(u.nome||u.email||"RH").split(/\s+/).map(p=>p[0]).join("").slice(0,2).toUpperCase();
  $("avatar").title=(u.nome||u.email)+" · "+u.perfil;
  $("source-sub").textContent=u.perfil+(u.propor?"":" · só consulta");
@@ -254,6 +256,52 @@ $("signin").addEventListener("click",()=>signIn().catch(e=>estadoLigacao("error"
 $("signout").addEventListener("click",()=>{
  if(sessaoAcesso()){sairAcesso();desligar();estadoLigacao("","Sessão terminada","Os números exibidos são fictícios. Entre com o seu código de acesso para ver os dados do Excel.");return}
  signOut().catch(e=>estadoLigacao("error","Erro ao terminar sessão",e.message));
+});
+
+// ---------- gravar colaborador (RH_API_Actualizar) ----------
+function podeGravar(){return Boolean(sessaoAcesso()&&utilizadorActual?.propor)}
+const empDlg=$("employee-dialog");let empModo="criar",empOriginal={};
+function construirCampos(){
+ const box=$("employee-fields");box.replaceChildren();
+ M.CAMPOS_COLABORADOR.forEach(c=>{const l=document.createElement("label"),sp=document.createElement("span");sp.textContent=c.rotulo;if(c.obrig)sp.className="req";l.append(sp);
+  let inp;if(c.opcoes){inp=document.createElement("select");const vazio=document.createElement("option");vazio.value="";vazio.textContent="—";inp.append(vazio);c.opcoes.forEach(o=>{const op=document.createElement("option");op.value=o;op.textContent=o;inp.append(op)})}
+  else{inp=document.createElement("input");inp.type=c.tipo==="number"?"text":(c.tipo||"text");if(c.tipo==="number")inp.inputMode="decimal";if(c.max)inp.maxLength=c.max}
+  inp.name=c.k;inp.dataset.campo=c.k;l.append(inp);box.append(l)});
+}
+function abrirColaborador(modo,codigo){
+ if(!sessaoAcesso()){abrirAcesso("Entre com o seu código de acesso para gravar.");return}
+ if(!podeGravar()){showToast("O seu perfil ("+(utilizadorActual?.perfil||"desconhecido")+") só permite consultar. Gravar exige Superadministrador ou Administrador RH.");return}
+ empModo=modo;construirCampos();$("employee-error").textContent="";
+ const linha=modo==="editar"?linhas("funcionarios","tbl_funcionarios").find(l=>String(M.campo(l,"Codigo")).trim()===codigo):null;
+ empOriginal=linha?M.linhaParaFormulario(linha):{};
+ $("employee-title").textContent=modo==="editar"?"Editar colaborador "+codigo:"Novo colaborador";
+ $("employee-submit").textContent=modo==="editar"?"Gravar alterações":"Criar colaborador";
+ empDlg.querySelectorAll("[data-campo]").forEach(i=>{i.value=empOriginal[i.dataset.campo]??"";if(i.dataset.campo==="Codigo")i.disabled=modo==="editar"});
+ if(modo==="criar")empDlg.querySelector('[data-campo="Estado"]').value="Activo";
+ const temUrl=Boolean(urlGravacao());$("write-url-field").hidden=temUrl;$("write-change-url").hidden=!temUrl;
+ if(typeof empDlg.showModal==="function")empDlg.showModal();else empDlg.setAttribute("open","");
+}
+function fecharColaborador(){if(typeof empDlg.close==="function")empDlg.close();else empDlg.removeAttribute("open")}
+$("new-employee").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para criar colaboradores.");return}carregar("funcionarios").then(()=>abrirColaborador("criar")).catch(()=>{})});
+$("employee-cancel").addEventListener("click",fecharColaborador);
+$("write-change-url").addEventListener("click",()=>{$("write-url-field").hidden=false;$("write-change-url").hidden=true;$("write-url").focus()});
+$("employee-form").addEventListener("submit",async ev=>{
+ ev.preventDefault();const btn=$("employee-submit");$("employee-error").textContent="";
+ const entrada={};empDlg.querySelectorAll("[data-campo]").forEach(i=>entrada[i.dataset.campo]=i.value);
+ if(empModo==="editar")entrada.Codigo=empOriginal.Codigo;
+ const {dados:d,erros}=M.validarColaborador(entrada,empModo);
+ if(erros.length){$("employee-error").textContent=erros.join(" ");return}
+ const enviar=empModo==="editar"?M.alteracoes(empOriginal,d):d;
+ if(empModo==="editar"&&Object.keys(enviar).length===1){$("employee-error").textContent="Não alterou nenhum campo.";return}
+ btn.disabled=true;
+ try{
+  if(!$("write-url-field").hidden)guardarUrlGravacao($("write-url").value);
+  const url=urlGravacao();if(!url)throw Error("Falta o endereço do fluxo RH_API_Actualizar.");
+  const r=await gravarColaborador(empModo,enviar,{credenciais:sessaoAcesso(),url});
+  fecharColaborador();showToast((r.modo==="criar"?"Colaborador criado: ":"Alterações gravadas: ")+(r.codigo||d.Codigo)+". A actualizar a lista…");
+  await carregar("funcionarios",true);
+ }catch(e){$("employee-error").textContent=e.message}
+ finally{btn.disabled=false}
 });
 
 render();

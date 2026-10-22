@@ -72,3 +72,18 @@ test('férias: colunas sem campos técnicos; feriados ordenados', () => {
   const f = M.feriados([{Dia: '25', Mes: '6', Feriado: 'B'}, {Dia: '1', Mes: '1', Feriado: 'A'}, {Dia: '', Mes: '', Feriado: ''}]);
   assert.deepEqual(f.map(x => x.nome), ['A', 'B']);
 });
+
+test('formulário de colaborador: validação, normalização e alterações', () => {
+  let r = M.validarColaborador({Codigo: '', Nome: ''}, 'criar');
+  assert.ok(r.erros.some(e => /Código/.test(e)) && r.erros.some(e => /Nome/.test(e)) && r.erros.some(e => /Empresa/.test(e)));
+  r = M.validarColaborador({Codigo: 'T9', Nome: 'Teste', Empresa: 'A', NUIT: '123', 'Vencimento Base': '17.000,50', email: 'x', 'Data Admissao': '22/10/2026', Estado: 'Talvez'}, 'criar');
+  assert.ok(r.erros.some(e => /NUIT/.test(e)) && r.erros.some(e => /E-mail/.test(e)) && r.erros.some(e => /admissão/.test(e)) && r.erros.some(e => /Estado/.test(e)));
+  assert.equal(r.dados['Vencimento Base'], '17000.5');
+  r = M.validarColaborador({Codigo: 'T9', Nome: '', Departamento: 'Ops'}, 'editar');
+  assert.deepEqual(r.erros, []);
+  assert.deepEqual(M.alteracoes({Codigo: 'T9', Departamento: 'Adm', Nome: 'X'}, {Codigo: 'T9', Departamento: 'Ops', Nome: 'X'}), {Codigo: 'T9', Departamento: 'Ops'});
+  assert.ok(M.validarColaborador({Codigo: "T'1", Nome: 'a', Empresa: 'b'}, 'criar').erros.some(e => /aspas/.test(e)));
+  const f = M.linhaParaFormulario({Codigo: 'T1', 'Data Admissao': '45292', 'Vencimento Base': '17,000.00'});
+  assert.equal(f['Data Admissao'], '2024-01-01');
+  assert.equal(f['Vencimento Base'], 17000);
+});

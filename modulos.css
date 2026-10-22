@@ -36,3 +36,13 @@ dialog#access-dialog::backdrop{background:#0f1b2a80}
 .key-out{display:block;margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;background:#f6f9fc;border:1px solid #e4ebf3;border-radius:6px;padding:8px}
 .key-out:empty{display:none}
 @media(max-width:560px){.dialog-actions{flex-wrap:wrap}.dialog-actions span{display:none}}
+dialog#employee-dialog{border:0;border-radius:14px;padding:0;width:min(720px,calc(100vw - 32px));max-height:calc(100vh - 32px);box-shadow:0 20px 60px #0f1b2a40;color:#293a4c}
+dialog#employee-dialog::backdrop{background:#0f1b2a80}
+#employee-form{padding:24px 26px 20px;display:flex;flex-direction:column;gap:14px}
+#employee-form h2{margin:0;font-size:20px}
+.form-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.form-grid2 label,#write-url-field label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#4c5c6c}
+.form-grid2 input,.form-grid2 select,#write-url-field input{border:1px solid #dce3eb;border-radius:8px;padding:9px 11px;font-size:14px;min-height:40px;background:#fff}
+.form-grid2 input:disabled{background:#f0f2f4;color:#7a8896}
+.form-grid2 .req::after{content:" *";color:#be2537}
+@media(max-width:560px){.form-grid2{grid-template-columns:1fr}}

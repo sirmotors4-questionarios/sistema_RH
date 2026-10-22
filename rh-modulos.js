@@ -169,3 +169,74 @@ export function feriados(linhas) {
 }
 
 export const NOME_MES = MESES.map(m => m[0].toUpperCase() + m.slice(1));
+
+// ---------- formulário de colaborador ----------
+// Colunas que o site pode escrever (o fluxo RH_API_Actualizar aplica a mesma lista).
+// Ficam de fora colunas calculadas (Idade, INSS, IRPS, Salário líquido…) e dados bancários.
+export const CAMPOS_COLABORADOR = Object.freeze([
+  {k: 'Codigo', rotulo: 'Código', obrig: true, max: 20},
+  {k: 'Nome', rotulo: 'Nome completo', obrig: true, max: 120},
+  {k: 'Nome Abreviado', rotulo: 'Nome abreviado', max: 60},
+  {k: 'Empresa', rotulo: 'Empresa', obrig: true, max: 80},
+  {k: 'Departamento', rotulo: 'Departamento', max: 80},
+  {k: 'Estado', rotulo: 'Estado', opcoes: ['Activo', 'Inactivo']},
+  {k: 'Categoria', rotulo: 'Categoria', max: 80},
+  {k: 'Profissao', rotulo: 'Profissão', max: 80},
+  {k: 'TipoContrato', rotulo: 'Tipo de contrato', max: 60},
+  {k: 'SituacaoProfissional', rotulo: 'Situação profissional', max: 60},
+  {k: 'RegimePagamento', rotulo: 'Regime de pagamento', opcoes: ['Mensal', 'Diário', 'Hora']},
+  {k: 'Data Admissao', rotulo: 'Data de admissão', tipo: 'date'},
+  {k: 'Vencimento Base', rotulo: 'Vencimento base (MT)', tipo: 'number'},
+  {k: 'TotalDependentes', rotulo: 'Dependentes', tipo: 'number', inteiro: true},
+  {k: 'NUIT', rotulo: 'NUIT', padrao: /^\d{9}$/, ajuda: '9 dígitos'},
+  {k: 'NumBI', rotulo: 'N.º do documento', max: 30},
+  {k: 'Sexo', rotulo: 'Sexo', opcoes: ['M', 'F']},
+  {k: 'Data Nascimento', rotulo: 'Data de nascimento', tipo: 'date'},
+  {k: 'Nacionalidade', rotulo: 'Nacionalidade', max: 40},
+  {k: 'EstadoCivil', rotulo: 'Estado civil', max: 30},
+  {k: 'Localidade', rotulo: 'Localidade', max: 80},
+  {k: 'email', rotulo: 'E-mail', tipo: 'email'},
+  {k: 'Telemovel', rotulo: 'Telemóvel', padrao: /^\+?[\d\s]{7,15}$/, ajuda: 'só dígitos, opcional +'}
+]);
+
+// Valores de uma linha do Excel prontos para o formulário (datas em AAAA-MM-DD, números sem formatação).
+export function linhaParaFormulario(linha) {
+  const out = {};
+  for (const c of CAMPOS_COLABORADOR) {
+    const v = campo(linha, c.k);
+    out[c.k] = c.tipo === 'date' ? data(v) : c.tipo === 'number' ? (numero(v) ?? '') : texto(v);
+  }
+  return out;
+}
+
+// Normaliza e valida. Em 'editar', campos vazios significam "manter o valor actual".
+export function validarColaborador(entrada, modo) {
+  const dados = {}, erros = [];
+  for (const c of CAMPOS_COLABORADOR) {
+    const v = texto(entrada?.[c.k]);
+    if (!v) {
+      if (c.obrig && (modo === 'criar' || c.k === 'Codigo')) erros.push(c.rotulo + ' é obrigatório.');
+      continue;
+    }
+    if (c.max && v.length > c.max) erros.push(c.rotulo + ': máximo ' + c.max + ' caracteres.');
+    if (c.opcoes && !c.opcoes.includes(v)) erros.push(c.rotulo + ': valor inválido.');
+    if (c.padrao && !c.padrao.test(v)) erros.push(c.rotulo + ': formato inválido (' + c.ajuda + ').');
+    if (c.tipo === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) erros.push(c.rotulo + ': formato inválido.');
+    if (c.tipo === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) erros.push(c.rotulo + ': use AAAA-MM-DD.');
+    if (c.tipo === 'number') {
+      const n = numero(v);
+      if (n === null || n < 0 || (c.inteiro && !Number.isInteger(n))) erros.push(c.rotulo + ': número inválido.');
+      else { dados[c.k] = String(n); continue; }
+    }
+    dados[c.k] = v;
+  }
+  if (/['"<>]/.test(dados.Codigo || '')) erros.push('Código: não use aspas nem < >.');
+  return {dados, erros};
+}
+
+// Em edição, envia só o que mudou (mais o código).
+export function alteracoes(original, dados) {
+  const out = {Codigo: dados.Codigo};
+  for (const [k, v] of Object.entries(dados)) if (k !== 'Codigo' && texto(original?.[k]) !== texto(v)) out[k] = v;
+  return out;
+}
