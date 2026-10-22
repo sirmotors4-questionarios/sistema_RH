@@ -70,6 +70,9 @@ Tabelas confirmadas no ficheiro Gestão de Colaboradores.xlsx (teste de 22/10/20
 
 Os nomes chegam exactamente como os cabeçalhos do Excel, **incluindo espaços e acentos** (ex.: `Vencimento Base`, `Data de Saída`, `Mês`). Cada linha traz também `ItemInternalId` e `@odata.etag`, que o site deve ignorar.
 
+### Páginas dos módulos
+`index.html` usa `rh-modulos.js` para mostrar os dados devolvidos pelo fluxo (só leitura): Colaboradores (pesquisa e filtro por estado), Contratos (parâmetros de pagamento vigentes e distribuição por tipo de contrato/regime), Adendas, Lançamento salarial (por mês e ano, com totais) e Férias/feriados. Sem sessão Microsoft, a página mantém os dados fictícios. Os botões de criação continuam desactivados até existir o fluxo de gravação com aprovação.
+
 ### Verificação
 Executar `node --test tests/rh-integration.test.mjs`. Os testes cobrem âmbito, vigência, fórmulas não validadas, parâmetros efectivos, IF, arredondamentos, calendário e bloqueio de escalões sobrepostos.
 
@@ -89,4 +92,4 @@ Browser (GitHub Pages) --MSAL / Microsoft Entra--> token (aud https://service.fl
 - MSAL 4.30.0 (LTS) é carregado de jsDelivr com `integrity` (SRI). A sessão fica em `sessionStorage`.
 
 ### Verificação
-`node --test tests/rh-integration.test.mjs tests/rh-api.test.mjs`
+`node --test tests/rh-integration.test.mjs tests/rh-api.test.mjs tests/rh-modulos.test.mjs`
