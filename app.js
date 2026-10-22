@@ -52,7 +52,7 @@ const fmt=n=>new Intl.NumberFormat("pt-MZ",{minimumFractionDigits:2,maximumFract
 function carregar(modulo,forcar=false){
  if(!forcar&&dados[modulo])return Promise.resolve(dados[modulo]);
  if(pedidos[modulo])return pedidos[modulo];
- setSource(modulo,"A carregar do Excel…");
+ setSource(modulo,modulo==="lancamentos"?"A carregar do Excel (1800+ lançamentos; pode demorar cerca de 1 minuto)…":"A carregar do Excel…");
  pedidos[modulo]=loadModulo(modulo,transporte()).then(r=>{
   dados[modulo]={tabelas:r.tabelas,carregado:new Date()};
   if(r.utilizador)mostrarUtilizador(r.utilizador);

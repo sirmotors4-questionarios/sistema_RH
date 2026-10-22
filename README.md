@@ -73,6 +73,14 @@ Os nomes chegam exactamente como os cabeçalhos do Excel, **incluindo espaços e
 ### Páginas dos módulos
 `index.html` usa `rh-modulos.js` para mostrar os dados devolvidos pelo fluxo (só leitura): Colaboradores (pesquisa e filtro por estado), Contratos (parâmetros de pagamento vigentes e distribuição por tipo de contrato/regime), Adendas, Lançamento salarial (por mês e ano, com totais) e Férias/feriados. Sem sessão Microsoft, a página mantém os dados fictícios. Os botões de criação continuam desactivados até existir o fluxo de gravação com aprovação.
 
+### Acesso por código pessoal (RH_API_Acesso) — sem login Microsoft
+Fluxo **RH_API_Acesso** (gatilho HTTP "Anyone"): `POST {"action", "email", "chave"}`. Autoriza só se a linha de `tbl_utilizadores_RH` com esse e-mail estiver `Activo` e `Codigo_Hash` for igual a `chave`; devolve o mesmo formato do RH_API_Consultar (403 caso contrário, 400 para acção inválida).
+
+- `chave = SHA-256(email em minúsculas + ":" + código)`, calculada no navegador; o código nunca é enviado.
+- **O URL do fluxo é secreto** (contém `sig=`): não o coloque no repositório. Cada utilizador cola-o uma vez no diálogo «Entrar»; fica no `localStorage` desse navegador. Se for divulgado, regenere o URL no gatilho do fluxo.
+- Registar um utilizador: a pessoa abre «Entrar» → «Primeiro acesso: gerar a chave», escreve o e-mail e o código (8+ caracteres) e envia a chave ao administrador, que a cola em `Codigo_Hash`. Para revogar, apague a chave ou mude `Estado`.
+- Tempo de resposta medido (22/10/2026): férias ~5 s, colaboradores/contratos ~12 s, lançamentos ~50 s (1805 linhas).
+
 ### Verificação
 Executar `node --test tests/rh-integration.test.mjs`. Os testes cobrem âmbito, vigência, fórmulas não validadas, parâmetros efectivos, IF, arredondamentos, calendário e bloqueio de escalões sobrepostos.
 
@@ -92,4 +100,4 @@ Browser (GitHub Pages) --MSAL / Microsoft Entra--> token (aud https://service.fl
 - MSAL 4.30.0 (LTS) é carregado de jsDelivr com `integrity` (SRI). A sessão fica em `sessionStorage`.
 
 ### Verificação
-`node --test tests/rh-integration.test.mjs tests/rh-api.test.mjs tests/rh-modulos.test.mjs`
+`node --test tests/rh-integration.test.mjs tests/rh-api.test.mjs tests/rh-modulos.test.mjs tests/rh-acesso.test.mjs`
