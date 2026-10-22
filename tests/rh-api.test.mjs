@@ -53,3 +53,24 @@ test('perfis: apenas Superadministrador aprova; perfis desconhecidos não têm a
   assert.equal(permissoes('Gestor').propor, false);
   assert.equal(permissoes('Desconhecido').consultar, false);
 });
+
+test('loadModulo envia a acção ao fluxo de consulta e devolve as tabelas por nome', async () => {
+  const {loadModulo} = await import('../rh-api.js');
+  let pedido;
+  const body = {ok: true, action: 'ferias', utilizador: {Perfil: 'Gestor'}, tabelas: [
+    {tabela: 'tbl_ferias', linhas: [{Codigo: 'T1'}]}, {tabela: 'tbl_feriados', linhas: []}]};
+  const fetchImpl = async (url, init) => { pedido = {url, init}; return resposta(200, body)(); };
+  const r = await loadModulo('ferias', {getToken, fetchImpl, url: 'https://exemplo.test/consultar'});
+  assert.deepEqual(JSON.parse(pedido.init.body), {action: 'ferias'});
+  assert.equal(pedido.url, 'https://exemplo.test/consultar');
+  assert.equal(r.tabelas.tbl_ferias.length, 1);
+  assert.deepEqual(r.tabelas.tbl_feriados, []);
+  assert.equal(r.utilizador.perfil, 'Gestor');
+});
+
+test('loadModulo rejeita módulo desconhecido, tabelas em falta e 400', async () => {
+  const {loadModulo} = await import('../rh-api.js');
+  await assert.rejects(loadModulo('salarios', {getToken, fetchImpl: resposta(200, {}), url: 'u'}), e => e.code === 'RH_ACTION');
+  await assert.rejects(loadModulo('contratos', {getToken, fetchImpl: resposta(200, {ok: true, tabelas: [{tabela: 'tbl_adendas', linhas: []}]}), url: 'u'}), /tbl_parametros_pagamento/);
+  await assert.rejects(loadModulo('ferias', {getToken, fetchImpl: resposta(400, {ok: false, erro: 'Accao invalida.'}), url: 'u'}), e => e.code === 'RH_ACTION' && /invalida/.test(e.message));
+});
