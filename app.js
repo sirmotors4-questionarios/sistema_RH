@@ -1,5 +1,6 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
 import {loadModulo} from "./rh-api.js";
+import {urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 "use strict";
 
@@ -51,8 +52,8 @@ const fmt=n=>new Intl.NumberFormat("pt-MZ",{minimumFractionDigits:2,maximumFract
 function carregar(modulo,forcar=false){
  if(!forcar&&dados[modulo])return Promise.resolve(dados[modulo]);
  if(pedidos[modulo])return pedidos[modulo];
- setSource(modulo,"A carregar do Excel…");
- pedidos[modulo]=loadModulo(modulo,{getToken}).then(r=>{
+ setSource(modulo,modulo==="lancamentos"?"A carregar do Excel (1800+ lançamentos; pode demorar cerca de 1 minuto)…":"A carregar do Excel…");
+ pedidos[modulo]=loadModulo(modulo,transporte()).then(r=>{
   dados[modulo]={tabelas:r.tabelas,carregado:new Date()};
   if(r.utilizador)mostrarUtilizador(r.utilizador);
   setSource(modulo,"Fonte: Gestão de Colaboradores.xlsx via Power Automate · "+dados[modulo].carregado.toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}));
@@ -61,6 +62,7 @@ function carregar(modulo,forcar=false){
  }).catch(e=>{
   setSource(modulo,"Erro: "+e.message);
   estadoLigacao("error","Não foi possível carregar",e.message);
+  if(e.code==="RH_FORBIDDEN"&&sessaoAcesso()){sairAcesso();desligar();abrirAcesso(e.message)}
   throw e;
  }).finally(()=>{delete pedidos[modulo]});
  pedidos[modulo].catch(()=>{});
@@ -158,9 +160,12 @@ M.NOME_MES.forEach((m,i)=>{const op=document.createElement("option");op.value=St
 const now=new Date();month.value=String(now.getMonth()+1);
 for(let y=now.getFullYear()-2;y<=now.getFullYear()+1;y++){const op=document.createElement("option");op.value=String(y);op.textContent=String(y);year.appendChild(op)}year.value=String(now.getFullYear());
 [month,year].forEach(s=>s.addEventListener("change",renderSalarios));
-$("load-month").addEventListener("click",()=>{if(!ligado){showToast("Inicie sessão com a conta Microsoft da SIR para consultar os lançamentos.");return}carregar("lancamentos",true)});
+$("load-month").addEventListener("click",()=>{if(!ligado){abrirAcesso();return}carregar("lancamentos",true)});
 
 // ---------- sessão ----------
+// Dois caminhos: código de acesso pessoal (fluxo RH_API_Acesso, independente do Entra)
+// ou conta Microsoft (quando o clientId estiver configurado).
+function transporte(){const s=sessaoAcesso();return s?{credenciais:s,url:urlGuardada()}:{getToken}}
 function estadoLigacao(tipo,titulo,texto){
  ["source-dot","status-pill","auth-notice"].forEach(id=>{$(id).classList.toggle("live",tipo==="live");$(id).classList.toggle("error",tipo==="error")});
  $("notice-title").textContent=titulo;$("notice-text").textContent=texto;
@@ -170,20 +175,63 @@ function mostrarUtilizador(u){
  $("avatar").title=(u.nome||u.email)+" · "+u.perfil;
  $("source-sub").textContent=u.perfil+(u.propor?"":" · só consulta");
 }
-function botoes(){const signed=Boolean(currentAccount());$("signin").hidden=signed||!authConfigured();$("signout").hidden=!signed;document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!signed)}
+function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAcesso());
+ $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);
+ document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
+function ligar(quem,via){
+ ligado=true;botoes();
+ $("status-pill").textContent="● Ligado ao Excel (só leitura)";$("source-title").textContent="Ligado ao SharePoint";$("source-sub").textContent=quem;
+ estadoLigacao("live","Sessão iniciada: "+quem,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate ("+via+"). Nesta fase o portal só consulta; não grava alterações.");
+ (precisa[paginaActual]||[]).forEach(m=>carregar(m));
+}
+function desligar(){
+ ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
+ $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
+ ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
+ const f=$("employee-filter");delete f.dataset.real;fillSelect(f,["Activo","Inactivo"],"Todos os estados");
+ render();
+}
+// Diálogo de acesso por código
+const dlg=$("access-dialog");
+function mostrarCampoUrl(mostrar){$("access-url-field").hidden=!mostrar;$("access-change-url").hidden=mostrar}
+function abrirAcesso(erro=""){
+ mostrarCampoUrl(!urlGuardada());$("access-error").textContent=erro;$("access-code").value="";$("access-key").textContent="";
+ if(typeof dlg.showModal==="function")dlg.showModal();else dlg.setAttribute("open","");
+ ($("access-email").value?$("access-code"):$("access-email")).focus();
+}
+function fecharAcesso(){if(typeof dlg.close==="function")dlg.close();else dlg.removeAttribute("open")}
+$("code-signin").addEventListener("click",()=>abrirAcesso());
+$("access-cancel").addEventListener("click",fecharAcesso);
+$("access-change-url").addEventListener("click",()=>{mostrarCampoUrl(true);$("access-url").focus()});
+$("access-form").addEventListener("submit",async ev=>{
+ ev.preventDefault();const btn=$("access-submit");btn.disabled=true;$("access-error").textContent="";
+ try{
+  const s=await entrarComCodigo({email:$("access-email").value,codigo:$("access-code").value,url:$("access-url").hidden?"":$("access-url").value});
+  $("access-code").value="";$("access-url").value="";
+  fecharAcesso();ligar(s.email,"código de acesso");
+ }catch(e){$("access-error").textContent=e.message}
+ finally{btn.disabled=false}
+});
+$("access-make-key").addEventListener("click",async()=>{
+ const email=$("access-email").value,codigo=$("access-code").value;
+ if(!validarEmail(email)||!validarCodigo(codigo)){$("access-error").textContent="Para gerar a chave, indique o e-mail e um código com pelo menos "+CODIGO_MINIMO+" caracteres.";return}
+ $("access-error").textContent="";$("access-key").textContent=await chaveAcesso(email,codigo);
+});
 $("signin").addEventListener("click",()=>signIn().catch(e=>estadoLigacao("error","Sessão não iniciada",e.message)));
-$("signout").addEventListener("click",()=>signOut().catch(e=>estadoLigacao("error","Erro ao terminar sessão",e.message)));
+$("signout").addEventListener("click",()=>{
+ if(sessaoAcesso()){sairAcesso();desligar();estadoLigacao("","Sessão terminada","Os números exibidos são fictícios. Entre com o seu código de acesso para ver os dados do Excel.");return}
+ signOut().catch(e=>estadoLigacao("error","Erro ao terminar sessão",e.message));
+});
 
 render();
 (async()=>{
- if(!authConfigured()){botoes();return}
+ const s=sessaoAcesso();
+ if(s&&urlGuardada()){ligar(s.email,"código de acesso");return}
+ botoes();
+ if(!authConfigured())return;
  try{
   await initAuth();botoes();
   const conta=currentAccount();
-  if(!conta){estadoLigacao("","Sessão Microsoft não iniciada","Os números exibidos são fictícios. Entre com a conta Microsoft da SIR para ver os dados do Excel (só leitura).");return}
-  ligado=true;
-  $("status-pill").textContent="● Ligado ao Excel (só leitura)";$("source-title").textContent="Ligado ao SharePoint";$("source-sub").textContent=conta.username;
-  estadoLigacao("live","Sessão iniciada: "+conta.username,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate. Nesta fase o portal só consulta; não grava alterações.");
-  (precisa[paginaActual]||[]).forEach(m=>carregar(m));
+  if(conta)ligar(conta.username,"conta Microsoft");
  }catch(e){estadoLigacao("error","Erro de autenticação",e.message)}
 })();

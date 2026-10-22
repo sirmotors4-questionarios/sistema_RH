@@ -24,16 +24,24 @@ export class ApiError extends Error {
   }
 }
 
-export async function callApi(action, {getToken, fetchImpl = globalThis.fetch, url = RH_CONFIG.apiUrl} = {}) {
-  if (typeof getToken !== 'function') throw new ApiError('Autenticação indisponível.', 0, 'RH_AUTH');
-  const token = await getToken();
+// Dois modos de autenticação:
+//  - getToken: token Microsoft Entra (fluxos "Any user in my tenant");
+//  - credenciais {email, chave}: código pessoal (fluxo RH_API_Acesso), sem login Microsoft.
+export async function callApi(action, {getToken, credenciais, fetchImpl = globalThis.fetch, url = RH_CONFIG.apiUrl} = {}) {
+  const headers = {'Content-Type': 'application/json'};
+  const pedido = {action};
+  if (credenciais) {
+    if (!credenciais.email || !credenciais.chave) throw new ApiError('Inicie sessão com o seu e-mail e código de acesso.', 0, 'RH_AUTH');
+    if (!url) throw new ApiError('Falta o endereço do fluxo de acesso.', 0, 'RH_AUTH');
+    pedido.email = credenciais.email;
+    pedido.chave = credenciais.chave;
+  } else {
+    if (typeof getToken !== 'function') throw new ApiError('Autenticação indisponível.', 0, 'RH_AUTH');
+    headers.Authorization = 'Bearer ' + await getToken();
+  }
   let response;
   try {
-    response = await fetchImpl(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + token},
-      body: JSON.stringify({action})
-    });
+    response = await fetchImpl(url, {method: 'POST', headers, body: JSON.stringify(pedido)});
   } catch {
     throw new ApiError('Não foi possível contactar o Power Automate. Verifique a ligação.', 0, 'RH_NETWORK');
   }
@@ -41,6 +49,7 @@ export async function callApi(action, {getToken, fetchImpl = globalThis.fetch, u
   try { body = await response.json(); } catch { body = null; }
   if (response.status === 401) throw new ApiError('Sessão Microsoft inválida ou expirada. Inicie sessão novamente.', 401, 'RH_AUTH');
   if (response.status === 403) {
+    if (credenciais) throw new ApiError('E-mail ou código de acesso inválidos, ou conta não activa em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
     const quem = body?.email ? ' (' + body.email + ')' : '';
     throw new ApiError('A sua conta' + quem + ' não está autorizada no Sistema RH. Peça a um Superadministrador para a registar em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
   }
