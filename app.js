@@ -81,7 +81,10 @@ function carregarLancamentos(periodo){
    setSource("lancamentos","A carregar "+M.NOME_MES[p.mes-1]+" "+p.ano+" do Excel…");
    const r=await loadModulo("lancamentos",{...transporte(),params:{ano:p.ano,mes:p.mes}});
    if(r.utilizador)mostrarUtilizador(r.utilizador);
-   const n=M.lancamentos(r.tabelas["tbl_lançamento"]||[],p.ano,p.mes).length;
+   const todas=r.tabelas["tbl_lançamento"]||[];
+   const n=M.lancamentos(todas,p.ano,p.mes).length;
+   // Se o fluxo devolveu outros meses (sem filtro no servidor), usa o mais recente sem novo pedido.
+   if(!n&&procurar){const ultimo=M.periodos(todas)[0];if(ultimo){p=ultimo;tentativa=6}}
    if(n||!procurar||tentativa===6){
     dados.lancamentos={tabelas:r.tabelas,periodo:p,carregado:new Date()};
     year.value=String(p.ano);month.value=String(p.mes);
