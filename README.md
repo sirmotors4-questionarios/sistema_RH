@@ -79,7 +79,9 @@ Fluxo **RH_API_Acesso** (gatilho HTTP "Anyone"): `POST {"action", "email", "chav
 - `chave = SHA-256(email em minúsculas + ":" + código)`, calculada no navegador; o código nunca é enviado.
 - **O URL do fluxo é secreto** (contém `sig=`): não o coloque no repositório. Cada utilizador cola-o uma vez no diálogo «Entrar»; fica no `localStorage` desse navegador. Se for divulgado, regenere o URL no gatilho do fluxo.
 - Registar um utilizador: a pessoa abre «Entrar» → «Primeiro acesso: gerar a chave», escreve o e-mail e o código (8+ caracteres) e envia a chave ao administrador, que a cola em `Codigo_Hash`. Para revogar, apague a chave ou mude `Estado`.
-- Tempo de resposta medido (22/10/2026): férias ~5 s, colaboradores/contratos ~12 s, lançamentos ~50 s (1805 linhas).
+- Lançamentos: o site envia `ano` e `mes`; o fluxo filtra `tbl_lançamento` no Excel (`Ano eq …  and Mês eq …`) e devolve só esse mês. Sem período indicado, o site procura o mês actual e recua até 6 meses.
+- Acção `configuracoes`: devolve as 4 tabelas do motor (tbl_configuracoes_RH, tbl_escaloes_RH, tbl_formulas_RH, tbl_auditoria_RH); a página Configurações usa a mesma sessão (iniciada em «Entrar», no mesmo separador).
+- Tempo de resposta medido antes do filtro (22/10/2026): férias ~5 s, colaboradores/contratos ~12 s, lançamentos ~50 s (1805 linhas).
 
 ### Verificação
 Executar `node --test tests/rh-integration.test.mjs`. Os testes cobrem âmbito, vigência, fórmulas não validadas, parâmetros efectivos, IF, arredondamentos, calendário e bloqueio de escalões sobrepostos.

@@ -27,9 +27,10 @@ export class ApiError extends Error {
 // Dois modos de autenticação:
 //  - getToken: token Microsoft Entra (fluxos "Any user in my tenant");
 //  - credenciais {email, chave}: código pessoal (fluxo RH_API_Acesso), sem login Microsoft.
-export async function callApi(action, {getToken, credenciais, fetchImpl = globalThis.fetch, url = RH_CONFIG.apiUrl} = {}) {
+export async function callApi(action, {getToken, credenciais, params, fetchImpl = globalThis.fetch, url = RH_CONFIG.apiUrl} = {}) {
   const headers = {'Content-Type': 'application/json'};
-  const pedido = {action};
+  // params: filtros opcionais (ex.: {ano, mes} para lançamentos); não podem substituir a acção nem as credenciais.
+  const pedido = {...(params || {}), action};
   if (credenciais) {
     if (!credenciais.email || !credenciais.chave) throw new ApiError('Inicie sessão com o seu e-mail e código de acesso.', 0, 'RH_AUTH');
     if (!url) throw new ApiError('Falta o endereço do fluxo de acesso.', 0, 'RH_AUTH');
@@ -60,8 +61,12 @@ export async function callApi(action, {getToken, credenciais, fetchImpl = global
   return body;
 }
 
-export async function loadConfiguracoes(deps) {
+export async function loadConfiguracoes(deps = {}) {
   const body = await callApi('configuracoes', deps);
+  // O fluxo de acesso por código devolve {tabelas:[{tabela, linhas}]}; o fluxo Entra devolve as tabelas no topo.
+  if (Array.isArray(body.tabelas)) {
+    for (const item of body.tabelas) if (item && typeof item.tabela === 'string' && Array.isArray(item.linhas)) body[item.tabela] = item.linhas;
+  }
   const user = body.utilizador || {};
   return {
     utilizador: {nome: user.Nome || '', email: user.Email || '', empresa: user.Empresa || '', ...permissoes(user.Perfil)},

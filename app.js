@@ -50,6 +50,7 @@ const fmt=n=>new Intl.NumberFormat("pt-MZ",{minimumFractionDigits:2,maximumFract
 
 // ---------- carregamento ----------
 function carregar(modulo,forcar=false){
+ if(modulo==="lancamentos")return carregarLancamentos(forcar?{ano:Number(year.value),mes:Number(month.value)}:null);
  if(!forcar&&dados[modulo])return Promise.resolve(dados[modulo]);
  if(pedidos[modulo])return pedidos[modulo];
  setSource(modulo,modulo==="lancamentos"?"A carregar do Excel (1800+ lançamentos; pode demorar cerca de 1 minuto)…":"A carregar do Excel…");
@@ -67,6 +68,36 @@ function carregar(modulo,forcar=false){
  }).finally(()=>{delete pedidos[modulo]});
  pedidos[modulo].catch(()=>{});
  return pedidos[modulo];
+}
+// Lançamentos: o fluxo devolve só o mês pedido. Sem período indicado, procura o mês actual
+// e recua até 6 meses até encontrar lançamentos.
+function carregarLancamentos(periodo){
+ if(!periodo&&dados.lancamentos)return Promise.resolve(dados.lancamentos);
+ if(pedidos.lancamentos)return pedidos.lancamentos;
+ const procurar=!periodo;
+ let p=periodo||(()=>{const d=new Date();return{ano:d.getFullYear(),mes:d.getMonth()+1}})();
+ const tarefa=(async()=>{
+  for(let tentativa=0;tentativa<(procurar?7:1);tentativa++){
+   setSource("lancamentos","A carregar "+M.NOME_MES[p.mes-1]+" "+p.ano+" do Excel…");
+   const r=await loadModulo("lancamentos",{...transporte(),params:{ano:p.ano,mes:p.mes}});
+   if(r.utilizador)mostrarUtilizador(r.utilizador);
+   const n=M.lancamentos(r.tabelas["tbl_lançamento"]||[],p.ano,p.mes).length;
+   if(n||!procurar||tentativa===6){
+    dados.lancamentos={tabelas:r.tabelas,periodo:p,carregado:new Date()};
+    year.value=String(p.ano);month.value=String(p.mes);
+    setSource("lancamentos","Fonte: Gestão de Colaboradores.xlsx via Power Automate · "+dados.lancamentos.carregado.toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}));
+    render();return dados.lancamentos;
+   }
+   p=p.mes===1?{ano:p.ano-1,mes:12}:{ano:p.ano,mes:p.mes-1};
+  }
+ })().catch(e=>{
+  setSource("lancamentos","Erro: "+e.message);
+  estadoLigacao("error","Não foi possível carregar",e.message);
+  if(e.code==="RH_FORBIDDEN"&&sessaoAcesso()){sairAcesso();desligar();abrirAcesso(e.message)}
+  throw e;
+ }).finally(()=>{delete pedidos.lancamentos});
+ pedidos.lancamentos=tarefa;tarefa.catch(()=>{});
+ return tarefa;
 }
 function linhas(modulo,tabela){return dados[modulo]?.tabelas[tabela]||[]}
 
@@ -109,16 +140,15 @@ function renderAdendas(){
  result.slice(0,MAX_LINHAS).forEach(a=>{const tr=document.createElement("tr");cell(tr,a.numero||a.id);cell(tr,[a.codigo,a.nome].filter(Boolean).join(" · "),{strong:true});cell(tr,a.campo);cell(tr,a.anterior);cell(tr,a.novo);cell(tr,M.formatarData(a.inicio));cell(tr,a.fim?M.formatarData(a.fim):"—");cell(tr,a.estado);cell(tr,a.aplicada);body.append(tr)});
  $("addenda-count").textContent=result.length+" de "+lista.length+" adenda(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"");
 }
-let periodosPreenchidos=false;
 function renderSalarios(){
  if(!dados.lancamentos)return;
  const todas=linhas("lancamentos","tbl_lançamento");
- if(!periodosPreenchidos){const ps=M.periodos(todas);if(ps.length){const anos=[...new Set(ps.map(p=>p.ano))];year.replaceChildren();anos.forEach(a=>{const op=document.createElement("option");op.value=String(a);op.textContent=String(a);year.append(op)});year.value=String(ps[0].ano);month.value=String(ps[0].mes)}periodosPreenchidos=true}
  showLoaded("lancamentos",true);
- const lista=M.lancamentos(todas,Number(year.value),Number(month.value));
+ const per=dados.lancamentos.periodo||{ano:Number(year.value),mes:Number(month.value)};
+ const lista=M.lancamentos(todas,per.ano,per.mes);
  const termo=$("pay-search").value.trim().toLocaleLowerCase("pt");
  const result=lista.filter(l=>!termo||[l.codigo,l.nome,l.empresa].some(x=>x.toLocaleLowerCase("pt").includes(termo)));
- $("pay-badge").textContent=M.NOME_MES[Number(month.value)-1]+" "+year.value+" · "+lista.length+" lançamento(s)";
+ $("pay-badge").textContent=M.NOME_MES[per.mes-1]+" "+per.ano+" · "+lista.length+" lançamento(s)";
  $("p-count").textContent=String(lista.length);
  $("p-states").textContent=M.contagem(lista,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos neste mês";
  $("p-acr").textContent=fmt(M.totais(lista,"acrescimos"));$("p-desc").textContent=fmt(M.totais(lista,"descontos"));$("p-liq").textContent=fmt(M.totais(lista,"liquido"));
@@ -144,7 +174,7 @@ function renderDashboard(){
  if(dados.funcionarios){const l=M.colaboradores(linhas("funcionarios","tbl_funcionarios"));$("m-activos").textContent=String(l.filter(c=>M.activo(c.estado)).length);$("m-activos-sub").textContent="de "+l.length+" registados"}
  if(dados.contratos){const a=M.adendas(linhas("contratos","tbl_adendas"));$("m-adendas").textContent=String(a.length);$("m-adendas-sub").textContent=a.filter(x=>M.activo(x.estado)||/vigor/i.test(x.estado)).length+" em vigor"}
  if(dados.ferias){const n=linhas("ferias","tbl_ferias").length;$("m-ferias").textContent=String(n);$("m-ferias-sub").textContent=n?"na tbl_ferias":"Sem registos"}
- if(dados.lancamentos){const p=M.periodos(linhas("lancamentos","tbl_lançamento"))[0];if(p){const l=M.lancamentos(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes);$("m-mes").textContent=M.NOME_MES[p.mes-1].slice(0,3)+" "+p.ano;$("m-mes-sub").textContent=l.length+" lançamentos · "+(M.contagem(l,x=>x.estado)[0]?.[0]||"")}}
+ if(dados.lancamentos){const p=dados.lancamentos.periodo||M.periodos(linhas("lancamentos","tbl_lançamento"))[0];if(p){const l=M.lancamentos(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes);$("m-mes").textContent=M.NOME_MES[p.mes-1].slice(0,3)+" "+p.ano;if(!l.length){$("m-mes-sub").textContent="Sem lançamentos nos últimos meses";}else $("m-mes-sub").textContent=l.length+" lançamentos · "+(M.contagem(l,x=>x.estado)[0]?.[0]||"")}}
  if(Object.keys(dados).length)$("dash-badge").textContent="Dados do Excel";
 }
 function render(){renderEmployees();renderContratos();renderAdendas();renderSalarios();renderFerias();renderDashboard()}
@@ -159,7 +189,7 @@ const month=$("pay-month"),year=$("pay-year");
 M.NOME_MES.forEach((m,i)=>{const op=document.createElement("option");op.value=String(i+1);op.textContent=m;month.appendChild(op)});
 const now=new Date();month.value=String(now.getMonth()+1);
 for(let y=now.getFullYear()-2;y<=now.getFullYear()+1;y++){const op=document.createElement("option");op.value=String(y);op.textContent=String(y);year.appendChild(op)}year.value=String(now.getFullYear());
-[month,year].forEach(s=>s.addEventListener("change",renderSalarios));
+[month,year].forEach(s=>s.addEventListener("change",()=>{if(ligado)carregarLancamentos({ano:Number(year.value),mes:Number(month.value)}).catch(()=>{});else renderSalarios()}));
 $("load-month").addEventListener("click",()=>{if(!ligado){abrirAcesso();return}carregar("lancamentos",true)});
 
 // ---------- sessão ----------
@@ -227,6 +257,7 @@ render();
 (async()=>{
  const s=sessaoAcesso();
  if(s&&urlGuardada()){ligar(s.email,"código de acesso");return}
+ if(location.hash==="#entrar"){history.replaceState(null,"",location.pathname);abrirAcesso()}
  botoes();
  if(!authConfigured())return;
  try{
