@@ -71,7 +71,27 @@ Tabelas confirmadas no ficheiro Gestão de Colaboradores.xlsx (teste de 22/10/20
 Os nomes chegam exactamente como os cabeçalhos do Excel, **incluindo espaços e acentos** (ex.: `Vencimento Base`, `Data de Saída`, `Mês`). Cada linha traz também `ItemInternalId` e `@odata.etag`, que o site deve ignorar.
 
 ### Páginas dos módulos
-`index.html` usa `rh-modulos.js` para mostrar os dados devolvidos pelo fluxo (só leitura): Colaboradores (pesquisa e filtro por estado), Contratos (parâmetros de pagamento vigentes e distribuição por tipo de contrato/regime), Adendas, Lançamento salarial (por mês e ano, com totais) e Férias/feriados. Sem sessão Microsoft, a página mantém os dados fictícios. Os botões de criação continuam desactivados até existir o fluxo de gravação com aprovação.
+`index.html` usa `rh-modulos.js` para mostrar os dados devolvidos pelo fluxo: Colaboradores (pesquisa, filtros Empresa → Departamento → Estado e ficha), Contratos (parâmetros de pagamento vigentes e distribuição por tipo de contrato/regime), Adendas, Lançamento salarial (por mês, com filtros Empresa → Departamento e totais de vencimento, acréscimos, descontos, INSS, IRPS e líquido) e Férias/feriados. Sem sessão, a página mantém os dados fictícios.
+
+### Ficha do colaborador (igual ao G_Colaboradores do VBA)
+- **Chave = Empresa + Código.** O mesmo código pode existir noutra empresa; dentro da mesma empresa é único. Códigos numéricos ficam com 4 dígitos (`12` → `0012`), como `RH_NormalizarCodigo`.
+- `ficha.js`: 6 separadores (Dados pessoais, Documentos, Contactos, Dados bancários, Dados profissionais, Contrato e adendas), modos Visualização / Edição / Novo, indicador de preenchimento por separador (0–49% Baixo, 50–79% Médio, 80–100% Bom).
+- Em edição, **Código e Empresa ficam bloqueados** (mudar de empresa é uma adenda). Só seguem para o Excel as colunas alteradas, mais `Data Ultima Alteracao` (série Excel) e `Utilizador Alteracao` (e-mail da sessão); ao criar também `Data Criacao`.
+- Listas com os valores que já existem na coluna; Sexo `Masculino`/`Feminino`; Estado `Activo`/`Inactivo`; Regime `Mensal`/`Hora`/`Diário`. Com Hora/Diário o vencimento base fica vazio e a ficha mostra o valor unitário vigente das Settings (`tbl_parametros_pagamento`).
+- O site usa os cabeçalhos reais de `tbl_funcionarios` (ex.: `Data EmissaoBI`, `ValidadeBI`, `NIB/Conta`, `T. Documento`). Colunas calculadas (`Idade`, `Anos de Trabalho`, `INSS…`, `IRPS`, `Salario Liquido`, `Chave_RH`) nunca são escritas.
+
+### Fluxo de gravação (RH_API_Actualizar)
+`POST {"action":"colaborador_gravar", "email", "chave", "modo":"criar"|"editar", "alvo":{"Empresa","Codigo"}, "dados":{cabeçalho: valor}}`
+
+1. `Autorizado`: utilizador activo, `Codigo_Hash` certo e perfil Superadministrador ou Administrador RH (senão 403).
+2. `Ler_Colaborador`: `tbl_funcionarios` filtrada por `Chave_RH eq 'EMPRESA|CODIGO'`.
+3. `Decisao`: 400 (dados inválidos), 409 (criar e já existe, ou par repetido no Excel), 404 (editar e não existe), senão `criar`/`editar`.
+4. `Adicionar_Colaborador` (Add a row, linha inteira = `dados` com `Codigo`/`Empresa` do alvo) ou `Actualizar_Colaborador` (Update a row, coluna-chave `Chave_RH`, só as colunas enviadas).
+5. `Response`: 200 `{ok, modo, codigo, empresa}`; erros `{ok:false, erro}`; 500 se o Excel falhar.
+
+**Coluna obrigatória no Excel:** `Chave_RH` no fim de `tbl_funcionarios`, calculada:
+`=UPPER(TRIM([@Empresa]))&"|"&IFERROR(TEXT(VALUE(TRIM([@Codigo]));"0000");UPPER(TRIM([@Codigo])))`
+(com separador `,` em vez de `;` se o Excel estiver em formato inglês). O VBA ignora esta coluna.
 
 ### Acesso por código pessoal (RH_API_Acesso) — sem login Microsoft
 Fluxo **RH_API_Acesso** (gatilho HTTP "Anyone"): `POST {"action", "email", "chave"}`. Autoriza só se a linha de `tbl_utilizadores_RH` com esse e-mail estiver `Activo` e `Codigo_Hash` for igual a `chave`; devolve o mesmo formato do RH_API_Consultar (403 caso contrário, 400 para acção inválida).

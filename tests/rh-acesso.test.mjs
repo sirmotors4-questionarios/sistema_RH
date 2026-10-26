@@ -66,3 +66,20 @@ test('params vão no corpo sem substituir acção; configuracoes aceita formato 
   assert.deepEqual(Object.keys(r.tables).sort(), ['tbl_auditoria_RH', 'tbl_configuracoes_RH', 'tbl_escaloes_RH', 'tbl_formulas_RH']);
   assert.equal(r.utilizador.aprovar, true);
 });
+
+test('gravarColaborador envia modo e dados; 409 vira erro legível; URL de gravação separado', async () => {
+  const {gravarColaborador} = await import('../rh-api.js');
+  let corpo;
+  const credenciais = {email: 'a@b.co', chave: 'f'.repeat(64)};
+  const ok = async (u, init) => { corpo = JSON.parse(init.body); return {status: 200, ok: true, json: async () => ({ok: true, modo: 'criar', codigo: 'T9'})}; };
+  const alvo = {Empresa: 'A', Codigo: 'T9'};
+  assert.deepEqual(await gravarColaborador('criar', {alvo, dados: {Codigo: 'T9', Empresa: 'A', Nome: 'X'}}, {credenciais, url: URL_OK, fetchImpl: ok}), {modo: 'criar', codigo: 'T9', empresa: 'A'});
+  assert.deepEqual(corpo, {modo: 'criar', alvo, dados: {Codigo: 'T9', Empresa: 'A', Nome: 'X'}, action: 'colaborador_gravar', email: 'a@b.co', chave: 'f'.repeat(64)});
+  await assert.rejects(gravarColaborador('editar', {alvo: {Codigo: 'T9'}, dados: {}}, {credenciais, url: URL_OK, fetchImpl: ok}), /Empresa/);
+  const conflito = async () => ({status: 409, ok: false, json: async () => ({ok: false, erro: 'Ja existe um colaborador com este codigo.'})});
+  await assert.rejects(gravarColaborador('criar', {alvo, dados: {}}, {credenciais, url: URL_OK, fetchImpl: conflito}), e => e.code === 'RH_CONFLITO' && /Ja existe/.test(e.message));
+  await assert.rejects(gravarColaborador('apagar', {}, {credenciais, url: URL_OK, fetchImpl: ok}), e => e.code === 'RH_ACTION');
+  assert.throws(() => A.guardarUrlGravacao(URL_OK), /consulta/);
+  A.guardarUrlGravacao(URL_OK.replace('TESTE', 'GRAVAR'));
+  assert.equal(A.urlGravacao(), URL_OK.replace('TESTE', 'GRAVAR'));
+});

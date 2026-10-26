@@ -80,3 +80,15 @@ export async function entrarComCodigo({email, codigo, url}, deps = {}) {
 export function sairAcesso() {
   escrever('sessionStorage', KEY_SESSAO, null);
 }
+
+// Endereço do fluxo de gravação (RH_API_Actualizar): também secreto, também só neste navegador.
+const KEY_URL_GRAVAR = 'rh.acesso.url.gravar';
+export function urlGravacao() {
+  const url = ler('localStorage', KEY_URL_GRAVAR);
+  return validarUrl(url) ? url : '';
+}
+export function guardarUrlGravacao(url) {
+  if (!validarUrl(url)) throw Error('Endereço do fluxo de gravação inválido. Cole o URL completo do gatilho HTTP (contém "sig=").');
+  if (String(url).trim() === urlGuardada()) throw Error('Este é o endereço do fluxo de consulta; cole o do RH_API_Actualizar.');
+  escrever('localStorage', KEY_URL_GRAVAR, String(url).trim());
+}

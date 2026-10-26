@@ -55,6 +55,7 @@ export async function callApi(action, {getToken, credenciais, params, fetchImpl 
     throw new ApiError('A sua conta' + quem + ' não está autorizada no Sistema RH. Peça a um Superadministrador para a registar em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
   }
   if (response.status === 400) throw new ApiError(body?.erro || 'Pedido inválido.', 400, 'RH_ACTION');
+  if (!response.ok && body?.erro) throw new ApiError(body.erro, response.status, response.status === 409 ? 'RH_CONFLITO' : 'RH_NAO_ENCONTRADO');
   if (!response.ok || !body || body.ok !== true) {
     throw new ApiError('O Power Automate devolveu uma resposta inválida (' + response.status + ').', response.status, 'RH_RESPONSE');
   }
@@ -101,4 +102,14 @@ export async function loadModulo(action, deps = {}) {
     action,
     tabelas
   };
+}
+
+// Gravação directa de um colaborador (fluxo RH_API_Actualizar). modo: 'criar' | 'editar'.
+// O colaborador é identificado por Empresa + Código (alvo); dados usa os cabeçalhos reais da tabela.
+// O fluxo só aceita perfis Superadministrador ou Administrador RH.
+export async function gravarColaborador(modo, {alvo, dados} = {}, deps = {}) {
+  if (!['criar', 'editar'].includes(modo)) throw new ApiError('Modo de gravação inválido.', 0, 'RH_ACTION');
+  if (!alvo?.Empresa || !alvo?.Codigo) throw new ApiError('Falta a Empresa ou o Código do colaborador.', 0, 'RH_ACTION');
+  const body = await callApi('colaborador_gravar', {...deps, params: {modo, alvo, dados}});
+  return {modo: body.modo || modo, codigo: body.codigo || alvo.Codigo, empresa: body.empresa || alvo.Empresa};
 }
