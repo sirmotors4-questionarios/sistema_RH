@@ -73,7 +73,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   // 2. Estrutura da tabela
   const tabela = workbook.getTable(TABELA);
   if (!tabela) { r.erros.push(`tabela ${TABELA} não encontrada`); return fim(); }
-  const cab = tabela.getHeaderRowRange().getValues()[0].map(String);
+  const cab = tabela.getHeaderRowRange().getValues()[0].map(v => String(v));
   const idx = (n: string) => cab.indexOf(n);
   for (const c of ["Empresa", "Codigo", "Ano", "Mês"]) if (idx(c) < 0) r.erros.push(`coluna ${c} em falta`);
   if (r.erros.length) return fim();
@@ -103,7 +103,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   const existentes = new Set<string>();
   if (nLinhas > 0) {
     const col = (n: string) => corpo.getColumn(idx(n)).getValues().map(v => v[0]);
-    const [e, c, a, m] = ["Empresa", "Codigo", "Ano", "Mês"].map(col);
+    const [e, c, a, m] = ["Empresa", "Codigo", "Ano", "Mês"].map(n => col(n));
     for (let i = 0; i < nLinhas; i++) existentes.add(chave(e[i], c[i], a[i], m[i]));
   }
 
@@ -136,7 +136,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
       return vazio(v) ? "" : (v as string | number | boolean);
     }));
   });
-  if (desconhecidas.size) r.erros.push(`colunas desconhecidas: ${[...desconhecidas].join(", ")}`);
+  if (desconhecidas.size) r.erros.push(`colunas desconhecidas: ${Array.from(desconhecidas).join(", ")}`);
   if (r.duplicadasNoPedido.length) r.erros.push(`${r.duplicadasNoPedido.length} duplicado(s) no pedido`);
   if (r.jaExistentes.length) r.erros.push(`${r.jaExistentes.length} chave(s) já existem na tabela`);
   if (r.erros.length) return fim();
