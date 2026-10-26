@@ -2,14 +2,15 @@ import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} fro
 import {loadModulo, gravarColaborador} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
+import {criarFicha} from "./ficha.js";
 "use strict";
 
 // Sem sessão Microsoft: dados fictícios. Com sessão: dados do Excel via RH_API_Consultar (só leitura).
 const mockEmployees = [
- {codigo:"RH-001",nome:"Colaborador Exemplo A",empresa:"Empresa A",departamento:"Administração",regime:"Mensal",estado:"Activo"},
- {codigo:"RH-002",nome:"Colaborador Exemplo B",empresa:"Empresa B",departamento:"Operações",regime:"Diário",estado:"Activo"},
- {codigo:"RH-003",nome:"Colaborador Exemplo C",empresa:"Empresa A",departamento:"Manutenção",regime:"Hora",estado:"Inactivo"},
- {codigo:"RH-004",nome:"Colaborador Exemplo D",empresa:"Empresa C",departamento:"Financeiro",regime:"Mensal",estado:"Activo"}
+ {codigo:"0001",nome:"Colaborador Exemplo A",empresa:"Empresa A",departamento:"Administração",profissao:"Técnico administrativo",regime:"Mensal",estado:"Activo"},
+ {codigo:"0002",nome:"Colaborador Exemplo B",empresa:"Empresa B",departamento:"Operações",profissao:"Motorista",regime:"Diário",estado:"Activo"},
+ {codigo:"0001",nome:"Colaborador Exemplo C",empresa:"Empresa B",departamento:"Manutenção",profissao:"Mecânico",regime:"Hora",estado:"Inactivo"},
+ {codigo:"0004",nome:"Colaborador Exemplo D",empresa:"Empresa C",departamento:"Financeiro",profissao:"Contabilista",regime:"Mensal",estado:"Activo"}
 ];
 const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
@@ -105,16 +106,21 @@ function carregarLancamentos(periodo){
 function linhas(modulo,tabela){return dados[modulo]?.tabelas[tabela]||[]}
 
 // ---------- páginas ----------
+function cascata(lista,selEmp,selDep){
+ const o=M.opcoesFiltro(lista,selEmp.value);
+ fillSelect(selEmp,o.empresas,"Todas");fillSelect(selDep,o.departamentos,"Todos");
+}
 function renderEmployees(){
  const lista=dados.funcionarios?M.colaboradores(linhas("funcionarios","tbl_funcionarios")):mockEmployees;
- const filtro=$("employee-filter");
- if(dados.funcionarios&&!filtro.dataset.real){fillSelect(filtro,M.contagem(lista,c=>c.estado).map(([k])=>k),"Todos os estados");filtro.dataset.real="1"}
- const result=M.filtrarColaboradores(lista,$("employee-search").value,filtro.value);
+ const emp=$("employee-company"),dep=$("employee-department"),filtro=$("employee-filter");
+ cascata(lista,emp,dep);
+ const result=M.filtrarColaboradores(lista,$("employee-search").value,filtro.value,{empresa:emp.value,departamento:dep.value});
  const tbody=$("employees-body");tbody.replaceChildren();
- if(!result.length)emptyRow(tbody,7,"Nenhum colaborador corresponde aos filtros.");
- result.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.regime);stateCell(tr,e.estado);
-  const td=document.createElement("td"),btn=document.createElement("button");btn.className="inline-btn";btn.textContent="Consultar";btn.addEventListener("click",()=>showToast(e.nome+" · "+[e.categoria||e.profissao,e.contrato,e.admissao?"admitido em "+M.formatarData(e.admissao):""].filter(Boolean).join(" · ")));td.append(btn);
-  if(dados.funcionarios&&podeGravar()){const ed=document.createElement("button");ed.className="inline-btn";ed.type="button";ed.textContent="Editar";ed.addEventListener("click",()=>abrirColaborador("editar",e.codigo));td.append(ed)}tr.append(td);tbody.append(tr)});
+ if(!result.length)emptyRow(tbody,8,"Nenhum colaborador corresponde aos filtros.");
+ result.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.profissao);cell(tr,e.regime);stateCell(tr,e.estado);
+  const td=document.createElement("td"),btn=document.createElement("button");btn.type="button";btn.className="inline-btn";btn.textContent="Abrir ficha";btn.setAttribute("aria-label","Abrir ficha de "+e.nome+" ("+e.codigo+" · "+e.empresa+")");
+  const abrir=()=>{if(!e.linha){showToast("Ficha disponível depois de entrar com o código de acesso.");return}ficha.ver(e.linha)};
+  btn.addEventListener("click",ev=>{ev.stopPropagation();abrir()});tr.addEventListener("click",abrir);td.append(btn);tr.append(td);tbody.append(tr)});
  $("employee-count").textContent=dados.funcionarios
   ?result.length+" de "+lista.length+" colaborador(es)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS+", refine a pesquisa":"")
   :result.length+" registo(s) demonstrativo(s)";
@@ -150,16 +156,19 @@ function renderSalarios(){
  showLoaded("lancamentos",true);
  const per=dados.lancamentos.periodo||{ano:Number(year.value),mes:Number(month.value)};
  const lista=M.lancamentos(todas,per.ano,per.mes);
- const termo=$("pay-search").value.trim().toLocaleLowerCase("pt");
- const result=lista.filter(l=>!termo||[l.codigo,l.nome,l.empresa].some(x=>x.toLocaleLowerCase("pt").includes(termo)));
+ const emp=$("pay-company"),dep=$("pay-department");cascata(lista,emp,dep);
+ const result=M.filtrarColaboradores(lista,$("pay-search").value,"",{empresa:emp.value,departamento:dep.value});
  $("pay-badge").textContent=M.NOME_MES[per.mes-1]+" "+per.ano+" · "+lista.length+" lançamento(s)";
- $("p-count").textContent=String(lista.length);
- $("p-states").textContent=M.contagem(lista,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos neste mês";
- $("p-acr").textContent=fmt(M.totais(lista,"acrescimos"));$("p-desc").textContent=fmt(M.totais(lista,"descontos"));$("p-liq").textContent=fmt(M.totais(lista,"liquido"));
+ $("p-count").textContent=String(result.length);
+ $("p-states").textContent=M.contagem(result,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos";
+ $("p-acr").textContent=fmt(M.totais(result,"acrescimos"));$("p-desc").textContent=fmt(M.totais(result,"descontos"));$("p-liq").textContent=fmt(M.totais(result,"liquido"));
  const body=$("pay-body");body.replaceChildren();
- if(!result.length)emptyRow(body,10,lista.length?"Nenhum lançamento corresponde à pesquisa.":"Sem lançamentos para este mês.");
- result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.regime);cell(tr,M.formatarValor(l.dias).replace(/,00$/,""),{num:true});cell(tr,M.formatarValor(l.acrescimos),{num:true});cell(tr,M.formatarValor(l.descontos),{num:true});cell(tr,M.formatarValor(l.irps),{num:true});cell(tr,M.formatarValor(l.liquido),{num:true,strong:true});cell(tr,l.estado);body.append(tr)});
- $("pay-count").textContent=result.length+" lançamento(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"");
+ if(!result.length)emptyRow(body,13,lista.length?"Nenhum lançamento corresponde aos filtros.":"Sem lançamentos para este mês.");
+ const v=x=>M.formatarValor(x);
+ result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.departamento);cell(tr,l.regime);cell(tr,v(l.dias).replace(/,00$/,""),{num:true});cell(tr,v(l.base),{num:true});cell(tr,v(l.acrescimos),{num:true});cell(tr,v(l.descontos),{num:true});cell(tr,v(l.inssColab),{num:true});cell(tr,v(l.irps),{num:true});cell(tr,v(l.liquido),{num:true,strong:true});stateCell(tr,l.estado);tr.lastChild.firstChild.classList.toggle("off",!/finaliz/i.test(l.estado));body.append(tr)});
+ const foot=$("pay-foot");foot.replaceChildren();
+ if(result.length){const tr=document.createElement("tr");cell(tr,"Totais",{strong:true});["","","","",""].forEach(()=>cell(tr,""));["base","acrescimos","descontos","inssColab","irps","liquido"].forEach(k=>cell(tr,fmt(M.totais(result,k)),{num:true,strong:true}));cell(tr,"");foot.append(tr)}
+ $("pay-count").textContent=result.length+" de "+lista.length+" lançamento(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"")+" · INSS empresa: "+fmt(M.totais(result,"inssEmpresa"))+" MT";
 }
 function renderFerias(){
  if(!dados.ferias)return;
@@ -181,10 +190,14 @@ function renderDashboard(){
  if(dados.lancamentos){const p=dados.lancamentos.periodo||M.periodos(linhas("lancamentos","tbl_lançamento"))[0];if(p){const l=M.lancamentos(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes);$("m-mes").textContent=M.NOME_MES[p.mes-1].slice(0,3)+" "+p.ano;if(!l.length){$("m-mes-sub").textContent="Sem lançamentos nos últimos meses";}else $("m-mes-sub").textContent=l.length+" lançamentos · "+(M.contagem(l,x=>x.estado)[0]?.[0]||"")}}
  if(Object.keys(dados).length)$("dash-badge").textContent="Dados do Excel";
 }
-function render(){renderEmployees();renderContratos();renderAdendas();renderSalarios();renderFerias();renderDashboard()}
+function render(){ficha.actualizar();renderEmployees();renderContratos();renderAdendas();renderSalarios();renderFerias();renderDashboard()}
 
 $("employee-search").addEventListener("input",renderEmployees);
-$("employee-filter").addEventListener("change",renderEmployees);
+["employee-filter","employee-department"].forEach(id=>$(id).addEventListener("change",renderEmployees));
+$("employee-company").addEventListener("change",()=>{$("employee-department").value="";renderEmployees()});
+$("employee-clear").addEventListener("click",()=>{["employee-search","employee-company","employee-department","employee-filter"].forEach(id=>$(id).value="");renderEmployees()});
+$("pay-company").addEventListener("change",()=>{$("pay-department").value="";renderSalarios()});
+$("pay-department").addEventListener("change",renderSalarios);
 $("addenda-search").addEventListener("input",renderAdendas);
 $("addenda-filter").addEventListener("change",renderAdendas);
 $("pay-search").addEventListener("input",renderSalarios);
@@ -215,15 +228,16 @@ function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAce
  document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
 function ligar(quem,via){
  ligado=true;botoes();
- $("status-pill").textContent="● Ligado ao Excel (só leitura)";$("source-title").textContent="Ligado ao SharePoint";$("source-sub").textContent=quem;
- estadoLigacao("live","Sessão iniciada: "+quem,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate ("+via+"). Nesta fase o portal só consulta; não grava alterações.");
+ $("status-pill").textContent="● Ligado ao Excel";$("source-title").textContent="Ligado ao SharePoint";$("source-sub").textContent=quem;
+ estadoLigacao("live","Sessão iniciada: "+quem,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate ("+via+"). Os administradores RH podem criar e editar colaboradores; os restantes módulos são só de consulta.");
  (precisa[paginaActual]||[]).forEach(m=>carregar(m));
 }
 function desligar(){
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
- const f=$("employee-filter");delete f.dataset.real;fillSelect(f,["Activo","Inactivo"],"Todos os estados");
+ ["employee-company","employee-department","pay-company","pay-department"].forEach(id=>$(id).value="");
+ if(ficha.aberta())document.getElementById("ficha").close();
  render();
 }
 // Diálogo de acesso por código
@@ -258,50 +272,24 @@ $("signout").addEventListener("click",()=>{
  signOut().catch(e=>estadoLigacao("error","Erro ao terminar sessão",e.message));
 });
 
-// ---------- gravar colaborador (RH_API_Actualizar) ----------
+// ---------- ficha do colaborador (gravação via RH_API_Actualizar) ----------
 function podeGravar(){return Boolean(sessaoAcesso()&&utilizadorActual?.propor)}
-const empDlg=$("employee-dialog");let empModo="criar",empOriginal={};
-function construirCampos(){
- const box=$("employee-fields");box.replaceChildren();
- M.CAMPOS_COLABORADOR.forEach(c=>{const l=document.createElement("label"),sp=document.createElement("span");sp.textContent=c.rotulo;if(c.obrig)sp.className="req";l.append(sp);
-  let inp;if(c.opcoes){inp=document.createElement("select");const vazio=document.createElement("option");vazio.value="";vazio.textContent="—";inp.append(vazio);c.opcoes.forEach(o=>{const op=document.createElement("option");op.value=o;op.textContent=o;inp.append(op)})}
-  else{inp=document.createElement("input");inp.type=c.tipo==="number"?"text":(c.tipo||"text");if(c.tipo==="number")inp.inputMode="decimal";if(c.max)inp.maxLength=c.max}
-  inp.name=c.k;inp.dataset.campo=c.k;l.append(inp);box.append(l)});
-}
-function abrirColaborador(modo,codigo){
- if(!sessaoAcesso()){abrirAcesso("Entre com o seu código de acesso para gravar.");return}
+const ficha=criarFicha({
+ funcionarios:()=>linhas("funcionarios","tbl_funcionarios"),
+ adendas:()=>dados.contratos?linhas("contratos","tbl_adendas"):null,
+ parametros:()=>dados.contratos?linhas("contratos","tbl_parametros_pagamento"):null,
+ carregarContratos:()=>carregar("contratos"),
+ podeGravar,
+ utilizador:()=>sessaoAcesso()?.email||"",
+ urlGravacao,guardarUrlGravacao,
+ gravar:(modo,pedido)=>gravarColaborador(modo,pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
+ recarregar:()=>carregar("funcionarios",true),
+ aviso:showToast
+});
+$("new-employee").addEventListener("click",()=>{
+ if(!ligado){abrirAcesso("Entre com o seu código de acesso para criar colaboradores.");return}
  if(!podeGravar()){showToast("O seu perfil ("+(utilizadorActual?.perfil||"desconhecido")+") só permite consultar. Gravar exige Superadministrador ou Administrador RH.");return}
- empModo=modo;construirCampos();$("employee-error").textContent="";
- const linha=modo==="editar"?linhas("funcionarios","tbl_funcionarios").find(l=>String(M.campo(l,"Codigo")).trim()===codigo):null;
- empOriginal=linha?M.linhaParaFormulario(linha):{};
- $("employee-title").textContent=modo==="editar"?"Editar colaborador "+codigo:"Novo colaborador";
- $("employee-submit").textContent=modo==="editar"?"Gravar alterações":"Criar colaborador";
- empDlg.querySelectorAll("[data-campo]").forEach(i=>{i.value=empOriginal[i.dataset.campo]??"";if(i.dataset.campo==="Codigo")i.disabled=modo==="editar"});
- if(modo==="criar")empDlg.querySelector('[data-campo="Estado"]').value="Activo";
- const temUrl=Boolean(urlGravacao());$("write-url-field").hidden=temUrl;$("write-change-url").hidden=!temUrl;
- if(typeof empDlg.showModal==="function")empDlg.showModal();else empDlg.setAttribute("open","");
-}
-function fecharColaborador(){if(typeof empDlg.close==="function")empDlg.close();else empDlg.removeAttribute("open")}
-$("new-employee").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para criar colaboradores.");return}carregar("funcionarios").then(()=>abrirColaborador("criar")).catch(()=>{})});
-$("employee-cancel").addEventListener("click",fecharColaborador);
-$("write-change-url").addEventListener("click",()=>{$("write-url-field").hidden=false;$("write-change-url").hidden=true;$("write-url").focus()});
-$("employee-form").addEventListener("submit",async ev=>{
- ev.preventDefault();const btn=$("employee-submit");$("employee-error").textContent="";
- const entrada={};empDlg.querySelectorAll("[data-campo]").forEach(i=>entrada[i.dataset.campo]=i.value);
- if(empModo==="editar")entrada.Codigo=empOriginal.Codigo;
- const {dados:d,erros}=M.validarColaborador(entrada,empModo);
- if(erros.length){$("employee-error").textContent=erros.join(" ");return}
- const enviar=empModo==="editar"?M.alteracoes(empOriginal,d):d;
- if(empModo==="editar"&&Object.keys(enviar).length===1){$("employee-error").textContent="Não alterou nenhum campo.";return}
- btn.disabled=true;
- try{
-  if(!$("write-url-field").hidden)guardarUrlGravacao($("write-url").value);
-  const url=urlGravacao();if(!url)throw Error("Falta o endereço do fluxo RH_API_Actualizar.");
-  const r=await gravarColaborador(empModo,enviar,{credenciais:sessaoAcesso(),url});
-  fecharColaborador();showToast((r.modo==="criar"?"Colaborador criado: ":"Alterações gravadas: ")+(r.codigo||d.Codigo)+". A actualizar a lista…");
-  await carregar("funcionarios",true);
- }catch(e){$("employee-error").textContent=e.message}
- finally{btn.disabled=false}
+ carregar("funcionarios").then(()=>ficha.novo()).catch(()=>{});
 });
 
 render();

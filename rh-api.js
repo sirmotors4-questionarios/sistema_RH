@@ -105,9 +105,11 @@ export async function loadModulo(action, deps = {}) {
 }
 
 // Gravação directa de um colaborador (fluxo RH_API_Actualizar). modo: 'criar' | 'editar'.
-// O fluxo só aceita perfis Superadministrador ou Administrador RH e só escreve as colunas permitidas.
-export async function gravarColaborador(modo, dados, deps = {}) {
+// O colaborador é identificado por Empresa + Código (alvo); dados usa os cabeçalhos reais da tabela.
+// O fluxo só aceita perfis Superadministrador ou Administrador RH.
+export async function gravarColaborador(modo, {alvo, dados} = {}, deps = {}) {
   if (!['criar', 'editar'].includes(modo)) throw new ApiError('Modo de gravação inválido.', 0, 'RH_ACTION');
-  const body = await callApi('colaborador_gravar', {...deps, params: {modo, dados}});
-  return {modo: body.modo, codigo: body.codigo};
+  if (!alvo?.Empresa || !alvo?.Codigo) throw new ApiError('Falta a Empresa ou o Código do colaborador.', 0, 'RH_ACTION');
+  const body = await callApi('colaborador_gravar', {...deps, params: {modo, alvo, dados}});
+  return {modo: body.modo || modo, codigo: body.codigo || alvo.Codigo, empresa: body.empresa || alvo.Empresa};
 }
