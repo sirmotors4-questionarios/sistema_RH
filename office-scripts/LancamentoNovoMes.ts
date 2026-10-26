@@ -12,8 +12,9 @@
  *   modo   "validar" (não escreve nada) | "gravar"
  *
  * Garantias:
- *  - Nunca escreve valores em colunas com fórmula: detecta-as na primeira linha
- *    de dados e repõe a MESMA fórmula (R1C1) nas linhas novas.
+ *  - Nunca escreve valores nas 11 colunas calculadas (PROTEGIDAS): repõe nas
+ *    linhas novas a fórmula R1C1 mais frequente de cada coluna. Outras colunas
+ *    com fórmula (ex.: Dias Trabalhados) aceitam um valor enviado, como no VBA.
  *  - Chave única Empresa + Código + Ano + Mês (normalizada). Rejeita duplicados
  *    no pedido e linhas que já existam na tabela.
  *  - Valida tudo antes de escrever; se houver erros, não escreve nenhuma linha.
@@ -35,6 +36,9 @@ interface Resultado {
 
 const TABELA = "tbl_lançamento";
 const LIMITE_LINHAS = 2000;
+// Colunas calculadas que nunca recebem valores (iguais a FORMULAS_LANCAMENTO no site).
+const PROTEGIDAS = ["Estado", "Estado de Reforma", "Vencimento Base", "INSS Colaborador", "INSS Empresa", "Total INSS",
+  "Salario Liquido", "Total de Acréscimos", "Total de Descontos", "IRPS", "Vencimento"];
 
 function norm(v: unknown): string {
   return String(v ?? "").trim().toUpperCase();
@@ -76,11 +80,24 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
 
   const corpo = tabela.getRangeBetweenHeaderAndTotal();
   const nLinhas = tabela.getRowCount();
-  // Fórmulas de referência: primeira linha de dados (as colunas calculadas são iguais em todas).
-  const formulasRef: string[] = nLinhas > 0 ? corpo.getRow(0).getFormulasR1C1()[0].map(String) : cab.map(() => "");
-  const ehFormula = formulasRef.map(f => f.startsWith("="));
+  if (nLinhas === 0) { r.erros.push("tabela sem linhas: não é possível obter as fórmulas de referência"); return fim(); }
+  // Fórmula de referência por coluna = a fórmula R1C1 mais frequente nessa coluna
+  // (algumas linhas antigas têm valores no lugar da fórmula, ex.: Dias Trabalhados).
+  const todas = corpo.getFormulasR1C1();
+  const formulasRef: string[] = cab.map((_, j) => {
+    const conta = new Map<string, number>();
+    for (const l of todas) { const f = String(l[j]); if (f.startsWith("=")) conta.set(f, (conta.get(f) ?? 0) + 1); }
+    let melhor = "", n = 0;
+    conta.forEach((v, f) => { if (v > n) { melhor = f; n = v; } });
+    return melhor;
+  });
+  const ehFormula = formulasRef.map(f => f !== "");
   r.colunasFormula = cab.filter((_, i) => ehFormula[i]);
-  if (nLinhas === 0) r.erros.push("tabela sem linhas: não é possível obter as fórmulas de referência");
+  for (const c of PROTEGIDAS) {
+    if (idx(c) < 0) r.erros.push(`coluna calculada ${c} em falta`);
+    else if (!ehFormula[idx(c)]) r.erros.push(`coluna ${c} devia ter fórmula e não tem`);
+  }
+  if (r.erros.length) return fim();
 
   // 3. Chaves existentes (lê só as 4 colunas da chave)
   const existentes = new Set<string>();
@@ -94,6 +111,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   const vistas = new Set<string>();
   const desconhecidas = new Set<string>();
   const matriz: (string | number | boolean)[][] = [];
+  const comFormula: boolean[][] = [];
   pedido.forEach((o, n) => {
     if (!o || typeof o !== "object") { r.erros.push(`linha ${n + 1}: não é objecto`); return; }
     if (!norm(o["Empresa"]) || !normCodigo(o["Codigo"])) { r.erros.push(`linha ${n + 1}: Empresa/Codigo em falta`); return; }
@@ -103,14 +121,19 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     if (existentes.has(k)) { r.jaExistentes.push(k); return; }
     for (const p of Object.keys(o)) {
       if (idx(p) < 0) desconhecidas.add(p);
-      else if (ehFormula[idx(p)]) r.erros.push(`linha ${n + 1}: tentativa de escrever na coluna com fórmula "${p}"`);
+      else if (PROTEGIDAS.includes(p) && o[p] !== null && o[p] !== undefined && o[p] !== "")
+        r.erros.push(`linha ${n + 1}: tentativa de escrever na coluna calculada "${p}"`);
     }
+    const vazio = (v: unknown) => v === null || v === undefined || v === "";
+    // Coluna com fórmula: mantém a fórmula, salvo se o pedido trouxer um valor e a coluna não for protegida.
+    const usa = cab.map((h, i) => ehFormula[i] && (PROTEGIDAS.includes(h) || vazio(o[h])));
+    comFormula.push(usa);
     matriz.push(cab.map((h, i) => {
-      if (ehFormula[i]) return "";               // reposto abaixo com a fórmula
+      if (usa[i]) return "";                     // reposto abaixo com a fórmula
       if (h === "Ano") return ano;
       if (h === "Mês") return mes;
       const v = o[h];
-      return v === null || v === undefined ? "" : (v as string | number | boolean);
+      return vazio(v) ? "" : (v as string | number | boolean);
     }));
   });
   if (desconhecidas.size) r.erros.push(`colunas desconhecidas: ${[...desconhecidas].join(", ")}`);
@@ -121,17 +144,14 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
 
   // 5. Escrita em bloco + reposição das fórmulas
   const primeira = nLinhas;
-  tabela.addRows(-1, matriz);
+  tabela.addRows(undefined, matriz);
   const novo = corpo.getWorksheet().getRangeByIndexes(
     corpo.getRowIndex() + primeira, corpo.getColumnIndex(), matriz.length, cab.length);
-  const formulas = novo.getFormulasR1C1();
-  for (let i = 0; i < matriz.length; i++) {
-    for (let j = 0; j < cab.length; j++) if (ehFormula[j]) formulas[i][j] = formulasRef[j];
-  }
-  // Só as colunas com fórmula são reescritas; as restantes mantêm os valores acabados de inserir.
+  // Só as colunas com fórmula são reescritas, coluna a coluna; as restantes mantêm os valores inseridos.
   cab.forEach((_, j) => {
     if (!ehFormula[j]) return;
-    novo.getColumn(j).setFormulasR1C1(formulas.map(l => [l[j]]));
+    const actual = novo.getColumn(j).getFormulasR1C1();
+    novo.getColumn(j).setFormulasR1C1(actual.map((l, i) => [comFormula[i][j] ? formulasRef[j] : l[0]]));
   });
   r.inseridas = matriz.length;
   r.ok = true;
