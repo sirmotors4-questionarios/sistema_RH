@@ -141,8 +141,13 @@ test('prepararGravacao: alvo fixo, só alterações, cabeçalhos reais, datas em
   assert.match(r.dados['Data Ultima Alteracao'], /^4\d{4}\.\d+$/);
   assert.deepEqual(r.ignorados, ['Distrito']);
   assert.equal(M.prepararGravacao('editar', original, {original, cabecalhos: cab}).alteracoes, 0);
-  const c = M.prepararGravacao('criar', {Codigo: '0001', Empresa: 'B', Nome: 'Y', Departamento: ''}, {cabecalhos: cab});
-  assert.deepEqual(c.dados, {Codigo: '0001', Empresa: 'B', Nome: 'Y', 'Data Ultima Alteracao': c.dados['Data Ultima Alteracao'], 'Utilizador Alteracao': ''});
+  const c = M.prepararGravacao('criar', {Codigo: '0001', Empresa: 'B', Nome: 'Y', Departamento: ''}, {cabecalhos: [...cab, 'Data Criacao']});
+  assert.deepEqual(c.dados, {Codigo: '0001', Empresa: 'B', Nome: 'Y', 'Data Ultima Alteracao': c.dados['Data Ultima Alteracao'], 'Utilizador Alteracao': '', 'Data Criacao': c.dados['Data Ultima Alteracao']});
+  // Nenhum campo da ficha corresponde a uma coluna calculada.
+  assert.ok(M.CAMPOS_COLABORADOR.every(f => !M.CALCULADAS.includes(f.k)));
+  // Cabeçalhos reais do ficheiro (Data EmissaoBI, ValidadeBI, NIB/Conta, T. Documento).
+  const reais = ['Data EmissaoBI', 'ValidadeBI', 'NIB/Conta', 'T. Documento', 'Canalizar'];
+  assert.deepEqual(['Data Emissao', 'Validade do Documento', 'NIB/Conta', 'T. Documento', 'Canalizar'].map(k => M.colunaReal(reais, M.definicao(k))), reais);
 });
 
 test('indicador de preenchimento usa a escala do VBA', () => {

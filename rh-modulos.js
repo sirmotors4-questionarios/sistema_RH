@@ -257,11 +257,14 @@ export const CAMPOS_COLABORADOR = Object.freeze([
   {k: 'Data de Saída', alt: ['Data Saida', 'Data de Saida'], rotulo: 'Data de saída', sep: 'profissionais', tipo: 'data'},
   {k: 'Motivo', alt: ['Motivo Saida', 'Motivo de Saída'], rotulo: 'Motivo de saída', sep: 'profissionais', max: 120},
   {k: 'RegimePagamento', alt: ['Regime Pagamento'], rotulo: 'Regime de pagamento', sep: 'profissionais', tipo: 'escolha', opcoes: ['Mensal', 'Hora', 'Diário']},
-  {k: 'Vencimento Base', rotulo: 'Vencimento base (MT/mês)', sep: 'profissionais', tipo: 'numero'}
+  {k: 'Vencimento Base', rotulo: 'Vencimento base (MT/mês)', sep: 'profissionais', tipo: 'numero'},
+  {k: 'Canalizar', rotulo: 'Ainda a canalizar?', sep: 'profissionais', tipo: 'escolha', opcoes: ['Sim', 'Não']}
 ]);
 
 // Colunas de auditoria escritas em cada gravação (se existirem na tabela), como no VBA.
-export const AUDITORIA = Object.freeze({data: 'Data Ultima Alteracao', utilizador: 'Utilizador Alteracao'});
+export const AUDITORIA = Object.freeze({data: 'Data Ultima Alteracao', utilizador: 'Utilizador Alteracao', criacao: 'Data Criacao'});
+// Colunas calculadas por fórmulas no Excel: o site nunca as escreve.
+export const CALCULADAS = Object.freeze(['Idade', 'Anos de Trabalho', 'INSS Colaborador', 'INSS Empresa', 'Total INSS', 'IRPS', 'Salario Liquido', 'Chave_RH']);
 
 const semEspacos = s => chave(s).replace(/[\s_.]/g, '');
 export const definicao = k => CAMPOS_COLABORADOR.find(c => c.k === k);
@@ -366,8 +369,11 @@ export function prepararGravacao(modo, dados, {original = {}, cabecalhos = [], u
   const alteracoes = Object.keys(saida).length;
   if (alteracoes) {
     const colData = colunaReal(cabecalhos, {k: AUDITORIA.data}), colUser = colunaReal(cabecalhos, {k: AUDITORIA.utilizador});
-    if (colData) saida[colData] = String(Math.round(((agora.getTime() - agora.getTimezoneOffset() * 60000) / 86400000 + 25569) * 100000) / 100000);
+    const serie = String(Math.round(((agora.getTime() - agora.getTimezoneOffset() * 60000) / 86400000 + 25569) * 100000) / 100000);
+    if (colData) saida[colData] = serie;
     if (colUser) saida[colUser] = utilizador;
+    const colCriacao = modo === 'criar' && colunaReal(cabecalhos, {k: AUDITORIA.criacao});
+    if (colCriacao) saida[colCriacao] = serie;
   }
   return {alvo, chave: chaveRH(alvo.Empresa, alvo.Codigo), dados: saida, alteracoes, ignorados};
 }
