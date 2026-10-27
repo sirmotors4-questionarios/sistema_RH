@@ -56,6 +56,7 @@ export function iniciarPainel(ctx) {
         if (ev.data?.tipo === "rh-dashboard-ola") ok();
         if (ev.data?.tipo === "rh-dashboard-pronto") estado("Dashboard actualizado: " + new Date().toLocaleTimeString("pt-MZ", {hour: "2-digit", minute: "2-digit"}));
         if (ev.data?.tipo === "rh-dashboard-erro") estado("Erro no dashboard: " + ev.data.erro);
+        if (ev.data?.tipo === "rh-dashboard-reiniciar") reiniciar();
       };
       window.addEventListener("message", ouvir);
     });
@@ -109,6 +110,13 @@ export function iniciarPainel(ctx) {
     } finally {
       aCarregar = false; $("painel-actualizar").disabled = false;
     }
+  }
+
+  // «Tentar de novo» (pedido pelo próprio dashboard quando não arranca): novo iframe e nova leitura.
+  function reiniciar() {
+    if (iframe) iframe.remove();
+    iframe = null; pronto = null;
+    abrir(true);
   }
 
   // Ao terminar sessão, o dashboard e os dados que tem são descartados.
