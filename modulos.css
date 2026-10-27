@@ -144,3 +144,6 @@ ul.criterios li{margin:3px 0;break-inside:avoid}
 .le-grupo input,.le-grupo select,.le-grupo textarea{width:100%;box-sizing:border-box}
 .le-grupo input:disabled,.le-grupo select:disabled,.le-grupo textarea:disabled{background:#f6f4f5;color:#7a7175}
 @media (max-width:560px){.le-grupo{grid-template-columns:1fr}}
+
+.state.gravando{background:#fff4e0;color:#94691c;font-variant-numeric:tabular-nums}.state.feito{background:#eaf8ef;color:#22864e}.state.erro{background:#fdecee;color:#a5283b;cursor:help}
+.pend{display:block;width:max-content;margin-top:5px}tr.linha-gravando td{background:#fffaf0}tr.linha-erro td{background:#fff5f6}

@@ -42,8 +42,11 @@ export function iniciarLancamentos(ctx) {
       if (a.titulo) b.title = a.titulo;
       b.addEventListener("click", async () => {
         if (!a.click) return;
-        const t = b.textContent; b.disabled = true; b.textContent = a.ocupado || "A gerar…"; $("rel-erro").textContent = "";
-        try { await a.click(); } catch (e) { $("rel-erro").textContent = e.message; } finally { if (b.isConnected) { b.disabled = false; b.textContent = t; } }
+        const t = b.textContent, ocupado = a.ocupado || "A gerar…", t0 = Date.now();
+        b.disabled = true; b.textContent = ocupado; $("rel-erro").textContent = "";
+        const relogio = setInterval(() => { if (b.isConnected && b.disabled) b.textContent = ocupado + " " + Math.round((Date.now() - t0) / 1000) + " s"; }, 1000);
+        try { await a.click(); } catch (e) { $("rel-erro").textContent = e.message + " (" + Math.round((Date.now() - t0) / 1000) + " s)"; }
+        finally { clearInterval(relogio); if (b.isConnected) { b.disabled = false; b.textContent = t; } }
       });
       return b;
     }));
@@ -175,31 +178,35 @@ export function iniciarLancamentos(ctx) {
     ctx.esquecerMes(ano, mes);
     const agora = await ctx.carregarMes(ano, mes);
     if (agora.length) throw Error("Entretanto já foram criados lançamentos para " + M.NOME_MES[mes - 1] + "/" + ano + ".");
+    const t0 = Date.now();
     const res = await ctx.gravarMes({ano, mes, mesNome: r.mesNome, linhas: r.linhas});
     if (t !== tarefa) return;
-    acompanhar(res.total, ano, mes, t);
+    acompanhar(res.total, ano, mes, t, t0);
   }
 
-  async function acompanhar(total, ano, mes, t) {
+  async function acompanhar(total, ano, mes, t, t0 = Date.now()) {
+    const seg = () => " · " + Math.round((Date.now() - t0) / 1000) + " s";
     const barra = el("progress", {max: total, value: 0}), estado = el("p", {class: "loading-line", text: "Pedido aceite. O Power Automate está a gravar " + total + " linhas na tbl_lançamento…"});
     $("rel-body").replaceChildren(el("div", {class: "nm-progresso"}, el("h3", {text: "A criar " + M.NOME_MES[mes - 1] + " " + ano}), barra, estado,
       el("p", {class: "help", text: "Pode fechar esta janela: a gravação continua no Power Automate (o mês é gravado num só bloco pelo Office Script)."})));
     accoes([{texto: "Fechar", click: fechar}]);
     const inicio = Date.now();
+    let primeira = true; // o fluxo só responde quando o script termina: a primeira verificação é imediata
     while (Date.now() - inicio < 20 * 60000) {
-      await new Promise(ok => setTimeout(ok, 30000));
+      if (!primeira) await new Promise(ok => setTimeout(ok, 30000));
+      primeira = false;
       if (t !== tarefa) { ctx.esquecerMes(ano, mes); return; }
       ctx.esquecerMes(ano, mes);
       let linhas;
       try { linhas = (await ctx.carregarMes(ano, mes)).filter(l => F.linhasFolha([l], ano, mes).length); } catch { continue; }
       if (t !== tarefa) return;
       barra.value = Math.min(linhas.length, total);
-      estado.textContent = linhas.length + " de " + total + " linhas gravadas…";
+      estado.textContent = linhas.length + " de " + total + " linhas gravadas…" + seg();
       if (linhas.length >= total) {
         const semFormula = linhas.filter(l => M.campo(l, "Salario Liquido") === "" || M.campo(l, "Vencimento") === "").length;
         estado.textContent = semFormula
           ? "Gravadas " + linhas.length + " linhas, mas " + semFormula + " ainda sem Vencimento/Salário líquido calculado. Abra o Excel e confirme que as colunas de fórmulas se estenderam às novas linhas."
-          : "Concluído: " + linhas.length + " lançamentos criados com estado Pendente.";
+          : "Concluído: " + linhas.length + " lançamentos criados com estado Pendente" + seg() + ".";
         estado.className = semFormula ? "form-error" : "ok-line";
         ctx.mostrarMes(ano, mes);
         return;
@@ -260,10 +267,10 @@ export function iniciarLancamentos(ctx) {
       const r = F.prepararEdicaoLancamento({original, valores, funcionario, adendas: contratos.adendas, parametros: contratos.parametros, ano, mes, utilizador: ctx.utilizador()});
       if (r.erros.length) throw Error(r.erros.join(" "));
       guardarUrlSePreciso();
-      await ctx.gravarLancamento({ano, mes, mesNome: M.NOME_MES[mes - 1], linha: r.linha});
+      // O Excel Online demora ~15–20 s: a janela fecha já e a gravação continua em segundo plano,
+      // com os segundos a contar na linha da tabela (ver gravarEmFundo em app.js).
       fechar();
-      ctx.aviso("Alteração gravada: " + chave.replace("|", " | ") + ". Fórmulas recalculadas no Excel.");
-      ctx.recarregarMes(ano, mes);
+      ctx.gravarEmFundo({ano, mes, chave, pedido: {ano, mes, mesNome: M.NOME_MES[mes - 1], linha: r.linha}});
     }});
     accoes(lista);
   }
@@ -281,8 +288,9 @@ export function iniciarLancamentos(ctx) {
     accoes([{texto: "Finalizar " + nome, classe: "primary", ocupado: "A finalizar…", desactivado: !abertas || !pode, titulo: !pode ? "Só Superadministrador ou Administrador RH" : "",
       click: async () => {
         guardarUrlSePreciso();
+        const t0 = Date.now();
         const r = await ctx.finalizarMes({ano, mes, mesNome: M.NOME_MES[mes - 1], utilizador: ctx.utilizador(), agoraSerie: agoraSerie()});
-        fechar(); ctx.aviso(r.alteradas + " lançamentos finalizados em " + nome + "."); ctx.recarregarMes(ano, mes);
+        fechar(); ctx.aviso(r.alteradas + " lançamentos finalizados em " + nome + " (" + Math.round((Date.now() - t0) / 1000) + " s)."); ctx.recarregarMes(ano, mes);
       }}, {texto: "Fechar", click: fechar}]);
   }
 
