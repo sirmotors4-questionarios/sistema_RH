@@ -1,4 +1,5 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
+import {iniciarPainel} from "./painel.js";
 import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
@@ -16,7 +17,7 @@ const mockEmployees = [
 ];
 const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
-const labels={dashboard:"Visão geral",colaboradores:"Colaboradores",contratos:"Contratos",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
+const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",contratos:"Contratos",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
 const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios"],contratos:["contratos","funcionarios"],adendas:["contratos"],salarios:["lancamentos"],ferias:["ferias"]};
 
@@ -34,6 +35,7 @@ function go(page){
  $("sidebar").classList.remove("open");
  window.scrollTo({top:0,behavior:"instant"});
  if(ligado)(precisa[page]||[]).forEach(m=>carregar(m));
+ if(page==="painel")painel.abrir();
 }
 document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go)));
@@ -310,8 +312,10 @@ function ligar(quem,via){
  $("status-pill").textContent="● Ligado ao Excel";$("source-title").textContent="Ligado ao SharePoint";$("source-sub").textContent=quem;
  estadoLigacao("live","Sessão iniciada: "+quem,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate ("+via+"). Os administradores RH podem criar e editar colaboradores; os restantes módulos são só de consulta.");
  (precisa[paginaActual]||[]).forEach(m=>carregar(m));
+ if(paginaActual==="painel")painel.abrir();
 }
 function desligar(){
+ painel.limpar();
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
@@ -388,6 +392,13 @@ const lanc=iniciarLancamentos({
  recarregarMes:(ano,mes)=>{meses.delete(ano+"-"+mes);mesesCompletos=false;carregarLancamentos({ano,mes}).catch(()=>{})},
  mostrarMes:(ano,mes)=>{year.value=String(ano);month.value=String(mes);carregarLancamentos({ano,mes}).catch(()=>{})},
  aviso:showToast
+});
+// ---------- Dashboard RH (Streamlit no navegador) ----------
+const painel=iniciarPainel({
+ ligado:()=>ligado,
+ funcionarios:forcar=>carregar("funcionarios",forcar).then(()=>linhas("funcionarios","tbl_funcionarios")),
+ carregarMes:(ano,mes,forcar)=>carregarMes(ano,mes,forcar),
+ periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null)
 });
 $("btn-preview").addEventListener("click",()=>lanc.preVisualizar());
 $("btn-pdf").addEventListener("click",e=>{const b=e.currentTarget;b.disabled=true;lanc.exportarFolha("pdf").catch(x=>showToast(x.message)).finally(()=>b.disabled=false)});
