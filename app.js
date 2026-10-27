@@ -39,6 +39,30 @@ document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click"
 document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go)));
 $("menu-toggle").addEventListener("click",()=>$("sidebar").classList.toggle("open"));
 function showToast(message){const t=$("toast");t.textContent=message;t.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>t.classList.remove("show"),4500)}
+// ---------- lançamentos gravados em segundo plano: o Excel Online demora ~15–20 s por gravação ----------
+const pendentes=new Map(); // "ano-mes|Empresa|Codigo" -> {inicio, fim?, erro?}
+const segs=ms=>Math.max(0,Math.round(ms/1000));
+function rotuloPendente(p){if(p.erro)return"Erro ao gravar";if(p.fim)return"Gravado · "+segs(p.fim-p.inicio)+" s";return"A gravar… "+segs(Date.now()-p.inicio)+" s"}
+function gravacaoActiva(k){const p=pendentes.get(k);return Boolean(p&&!p.fim&&!p.erro)}
+function actualizarPendentes(){
+ document.querySelectorAll("[data-pendente]").forEach(b=>{const p=pendentes.get(b.dataset.pendente);if(p)b.textContent=rotuloPendente(p)});
+ if(![...pendentes.keys()].some(gravacaoActiva)){clearInterval(actualizarPendentes.timer);actualizarPendentes.timer=null}
+}
+function gravarEmFundo({ano,mes,chave,pedido}){
+ const k=ano+"-"+mes+"|"+chave,quem=chave.replace("|"," | ");
+ if(gravacaoActiva(k)){showToast("Este lançamento ainda está a ser gravado.");return}
+ const p={inicio:Date.now()};pendentes.set(k,p);renderSalarios();showToast("A gravar "+quem+"… O Excel demora cerca de 15–20 s; pode continuar a trabalhar.");
+ if(!actualizarPendentes.timer)actualizarPendentes.timer=setInterval(actualizarPendentes,1000);
+ gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}).then(()=>{
+  p.fim=Date.now();actualizarPendentes();
+  showToast("Alteração gravada: "+quem+" em "+segs(p.fim-p.inicio)+" s. Fórmulas recalculadas no Excel.");
+  meses.delete(ano+"-"+mes);mesesCompletos=false;
+  carregarLancamentos({ano,mes}).catch(()=>{}).finally(()=>{if(pendentes.get(k)===p){pendentes.delete(k);renderSalarios()}});
+ }).catch(e=>{
+  p.erro=e.message||String(e);actualizarPendentes();renderSalarios();
+  showToast("Não gravado ("+quem+", "+segs(Date.now()-p.inicio)+" s): "+p.erro);
+ });
+}
 document.querySelectorAll("[data-action]").forEach(el=>el.addEventListener("click",()=>showToast("Gravação ainda não activada neste módulo. Já disponível: criar e editar colaboradores.")));
 
 // ---------- utilitários de tabela ----------
@@ -186,7 +210,7 @@ function renderSalarios(){
  const body=$("pay-body");body.replaceChildren();
  if(!result.length)emptyRow(body,13,lista.length?"Nenhum lançamento corresponde aos filtros.":"Sem lançamentos para este mês.");
  const v=x=>M.formatarValor(x);
- result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.departamento);cell(tr,l.regime);cell(tr,v(l.dias).replace(/,00$/,""),{num:true});cell(tr,v(l.base),{num:true});cell(tr,v(l.acrescimos),{num:true});cell(tr,v(l.descontos),{num:true});cell(tr,v(l.inssColab),{num:true});cell(tr,v(l.irps),{num:true});cell(tr,v(l.liquido),{num:true,strong:true});stateCell(tr,l.estado);tr.lastChild.firstChild.classList.toggle("off",!/finaliz/i.test(l.estado));tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
+ result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.departamento);cell(tr,l.regime);cell(tr,v(l.dias).replace(/,00$/,""),{num:true});cell(tr,v(l.base),{num:true});cell(tr,v(l.acrescimos),{num:true});cell(tr,v(l.descontos),{num:true});cell(tr,v(l.inssColab),{num:true});cell(tr,v(l.irps),{num:true});cell(tr,v(l.liquido),{num:true,strong:true});stateCell(tr,l.estado);tr.lastChild.firstChild.classList.toggle("off",!/finaliz/i.test(l.estado));const pk=per.ano+"-"+per.mes+"|"+M.chaveRH(M.campo(l.linha,"Empresa"),M.campo(l.linha,"Codigo")),pp=pendentes.get(pk);if(pp){const cls=pp.erro?"erro":pp.fim?"feito":"gravando";const b=tr.lastChild.firstChild;b.dataset.pendente=pk;b.textContent=rotuloPendente(pp);b.classList.add(cls);const n=document.createElement("small");n.className="pend state "+cls;n.dataset.pendente=pk;n.textContent=rotuloPendente(pp);tr.children[1].append(n);tr.classList.add("linha-"+cls);if(pp.erro){b.title=pp.erro;n.title=pp.erro}}tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>gravacaoActiva(pk)?showToast("Este lançamento ainda está a ser gravado ("+segs(Date.now()-pp.inicio)+" s)."):lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
  const foot=$("pay-foot");foot.replaceChildren();
  if(result.length){const tr=document.createElement("tr");cell(tr,"Totais",{strong:true});["","","","",""].forEach(()=>cell(tr,""));["base","acrescimos","descontos","inssColab","irps","liquido"].forEach(k=>cell(tr,fmt(M.totais(result,k)),{num:true,strong:true}));cell(tr,"");foot.append(tr)}
  $("pay-count").textContent=result.length+" de "+lista.length+" lançamento(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"")+" · INSS empresa: "+fmt(M.totais(result,"inssEmpresa"))+" MT";
@@ -326,6 +350,7 @@ const lanc=iniciarLancamentos({
  podeGravar,utilizador:()=>sessaoAcesso()?.email||"",urlGravacao,guardarUrlGravacao,
  gravarMes:pedido=>gravarNovoMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
  gravarLancamento:pedido=>gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
+ gravarEmFundo,
  finalizarMes:pedido=>finalizarMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
  recarregarMes:(ano,mes)=>{meses.delete(ano+"-"+mes);mesesCompletos=false;carregarLancamentos({ano,mes}).catch(()=>{})},
  mostrarMes:(ano,mes)=>{year.value=String(ano);month.value=String(mes);carregarLancamentos({ano,mes}).catch(()=>{})},
