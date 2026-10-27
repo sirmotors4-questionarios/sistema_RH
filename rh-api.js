@@ -122,3 +122,19 @@ export async function gravarNovoMes({ano, mes, mesNome, linhas} = {}, deps = {})
   const body = await callApi('lancamento_novo_mes', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas}});
   return {total: Number(body.total) || linhas.length, modo: body.modo};
 }
+
+// Edição de um lançamento do mês (Office Script, modo "editar"): só as entradas mensais e as condições
+// sincronizadas com o contrato. O fluxo responde com o resultado do script ({ok, alteradas}).
+export async function gravarLancamento({ano, mes, mesNome, linha} = {}, deps = {}) {
+  if (!linha || !linha.Empresa || !linha.Codigo) throw new ApiError('Lançamento sem Empresa/Código.', 0, 'RH_ACTION');
+  const body = await callApi('lancamento_editar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas: [linha]}});
+  return {alteradas: Number(body.alteradas) || 1};
+}
+
+// Finalizar mês (modo "finalizar"): todos os lançamentos do mês passam a Finalizado / Revisto = Sim.
+export async function finalizarMes({ano, mes, mesNome, utilizador = '', agoraSerie = ''} = {}, deps = {}) {
+  if (!mesNome) throw new ApiError('Mês inválido.', 0, 'RH_ACTION');
+  const body = await callApi('lancamento_finalizar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome,
+    linhas: [{'Utilizador Alteracao': utilizador, 'Data Ultima Alteracao': agoraSerie}]}});
+  return {alteradas: Number(body.alteradas) || 0};
+}

@@ -168,7 +168,8 @@ export function lancamentos(linhas, ano, mesRef) {
     irps: campo(l, 'IRPS'),
     liquido: campo(l, 'Salario Liquido'),
     estado: texto(campo(l, 'Estado do Lançamento')),
-    revisto: texto(campo(l, 'Revisto'))
+    revisto: texto(campo(l, 'Revisto')),
+    linha: l
   })).filter(l => (ano == null || l.ano === Number(ano)) && (mesRef == null || l.mes === Number(mesRef)));
 }
 

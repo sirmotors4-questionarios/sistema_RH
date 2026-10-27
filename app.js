@@ -1,5 +1,5 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
-import {loadModulo, gravarColaborador, gravarNovoMes} from "./rh-api.js";
+import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
@@ -186,7 +186,7 @@ function renderSalarios(){
  const body=$("pay-body");body.replaceChildren();
  if(!result.length)emptyRow(body,13,lista.length?"Nenhum lançamento corresponde aos filtros.":"Sem lançamentos para este mês.");
  const v=x=>M.formatarValor(x);
- result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.departamento);cell(tr,l.regime);cell(tr,v(l.dias).replace(/,00$/,""),{num:true});cell(tr,v(l.base),{num:true});cell(tr,v(l.acrescimos),{num:true});cell(tr,v(l.descontos),{num:true});cell(tr,v(l.inssColab),{num:true});cell(tr,v(l.irps),{num:true});cell(tr,v(l.liquido),{num:true,strong:true});stateCell(tr,l.estado);tr.lastChild.firstChild.classList.toggle("off",!/finaliz/i.test(l.estado));body.append(tr)});
+ result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.departamento);cell(tr,l.regime);cell(tr,v(l.dias).replace(/,00$/,""),{num:true});cell(tr,v(l.base),{num:true});cell(tr,v(l.acrescimos),{num:true});cell(tr,v(l.descontos),{num:true});cell(tr,v(l.inssColab),{num:true});cell(tr,v(l.irps),{num:true});cell(tr,v(l.liquido),{num:true,strong:true});stateCell(tr,l.estado);tr.lastChild.firstChild.classList.toggle("off",!/finaliz/i.test(l.estado));tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
  const foot=$("pay-foot");foot.replaceChildren();
  if(result.length){const tr=document.createElement("tr");cell(tr,"Totais",{strong:true});["","","","",""].forEach(()=>cell(tr,""));["base","acrescimos","descontos","inssColab","irps","liquido"].forEach(k=>cell(tr,fmt(M.totais(result,k)),{num:true,strong:true}));cell(tr,"");foot.append(tr)}
  $("pay-count").textContent=result.length+" de "+lista.length+" lançamento(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"")+" · INSS empresa: "+fmt(M.totais(result,"inssEmpresa"))+" MT";
@@ -325,6 +325,9 @@ const lanc=iniciarLancamentos({
  contratos:()=>carregar("contratos").then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),
  podeGravar,utilizador:()=>sessaoAcesso()?.email||"",urlGravacao,guardarUrlGravacao,
  gravarMes:pedido=>gravarNovoMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
+ gravarLancamento:pedido=>gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
+ finalizarMes:pedido=>finalizarMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
+ recarregarMes:(ano,mes)=>{meses.delete(ano+"-"+mes);mesesCompletos=false;carregarLancamentos({ano,mes}).catch(()=>{})},
  mostrarMes:(ano,mes)=>{year.value=String(ano);month.value=String(mes);carregarLancamentos({ano,mes}).catch(()=>{})},
  aviso:showToast
 });
@@ -332,6 +335,7 @@ $("btn-preview").addEventListener("click",()=>lanc.preVisualizar());
 $("btn-pdf").addEventListener("click",e=>{const b=e.currentTarget;b.disabled=true;lanc.exportarFolha("pdf").catch(x=>showToast(x.message)).finally(()=>b.disabled=false)});
 $("btn-xlsx").addEventListener("click",e=>{const b=e.currentTarget;b.disabled=true;lanc.exportarFolha("xlsx").catch(x=>showToast(x.message)).finally(()=>b.disabled=false)});
 $("btn-comparativo").addEventListener("click",()=>lanc.comparativo());
+$("btn-finalizar").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para finalizar o mês.");return}lanc.finalizar()});
 $("novo-mes").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para criar um novo mês.");return}lanc.novoMes()});
 
 render();

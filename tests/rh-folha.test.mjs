@@ -161,3 +161,28 @@ test('adendas antigas (cabeçalho + detalhes) contam como no VBA', () => {
   const r = F.prepararNovoMes({ano: 2026, mes: 4, funcionarios: [f], adendas: todas});
   assert.equal(r.linhas[0]['Dias Trabalhados'], '16');   // 21/03 a 05/04; a adenda anulada é ignorada
 });
+
+test('edição de lançamento: valida entradas, sincroniza contrato e bloqueia Finalizado', () => {
+  const S = d => F.serie(d);
+  const f = {Codigo: '0031', Empresa: 'A', Nome: 'Rui', Estado: 'Activo', RegimePagamento: 'Mensal', 'Vencimento Base': '20000', TipoContrato: 'Efectivo', 'Data Admissao': S('2020-01-01')};
+  const original = {Codigo: '0031', Empresa: 'A', Ano: 2026, 'Mês': 'Abril', RegimePagamento: 'Mensal', 'Estado do Lançamento': 'Pendente'};
+  const adendas = [{Codigo: '31', Empresa: 'A', Campo_Alterado: 'Data de Saída', Valor_Novo: S('2026-04-01'), Estado_Adenda: 'Activa', Data_Inicio_Vigencia: S('2026-03-28')},
+                   {Codigo: '31', Empresa: 'A', Campo_Alterado: 'Vencimento Base', Valor_Novo: '22000', Estado_Adenda: 'Activa', Data_Inicio_Vigencia: S('2026-04-01')}];
+  const valores = {Canalizar: 'Sim', TotalDependentes: '2', 'Horas Trabalhadas': '10', 'Faltas Justificadas': '0', 'Faltas Injustificadas': '1',
+    'Horas Extras': '4,5', 'Subsídios': '1.500,00', 'Bónus': '0', 'Outros Acréscimos': '', 'Adiantamentos': '500', 'Empréstimos': '0', 'Outros Descontos': '0', 'Observações': 'Saída 01/04'};
+  const r = F.prepararEdicaoLancamento({original, valores, funcionario: f, adendas, ano: 2026, mes: 4, utilizador: 'rh@sir.test'});
+  assert.deepEqual(r.erros, []);
+  assert.equal(r.linha['Dias Trabalhados'], 12);            // saída a 01/04 por adenda: 21/03 a 01/04
+  assert.equal(r.linha['Valor Unitário'], 22000);           // aumento por adenda
+  assert.equal(r.linha['Horas Trabalhadas'], '');           // Mensal: horas não se aplicam
+  assert.equal(r.linha['Subsídios'], 1500);
+  assert.equal(r.linha['Horas Extras'], 4.5);
+  assert.equal(r.linha['Outros Acréscimos'], 0);
+  assert.equal(r.linha['Data Fim Contrato'], Number(S('2026-04-01')));
+  assert.equal(r.linha['Utilizador Alteracao'], 'rh@sir.test');
+  assert.ok(!('Salario Liquido' in r.linha) && !('IRPS' in r.linha) && !('Estado do Lançamento' in r.linha));
+  const mau = F.prepararEdicaoLancamento({original, valores: {...valores, Canalizar: '', TotalDependentes: '1,5', 'Bónus': '-3'}, funcionario: f, adendas, ano: 2026, mes: 4});
+  assert.equal(mau.erros.length, 3);
+  const fin = F.prepararEdicaoLancamento({original: {...original, 'Estado do Lançamento': 'Finalizado'}, valores, funcionario: f, ano: 2026, mes: 4});
+  assert.match(fin.erros[0], /Finalizado/);
+});

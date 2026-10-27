@@ -129,6 +129,78 @@ export function idLancamento(ano, mes, empresa, codigo) {
 
 const periodoIgual = (l, ano, mes) => n(campo(l, "Ano")) === Number(ano) && mesNumero(campo(l, "Mês", "Mes")) === Number(mes);
 
+// Condição de pagamento vigente no período (RH_ActualizarPagamentoLinha / CriarNovoMes):
+// regime e vencimento com adendas; Hora/Diário pelas Settings; limites do contrato e dias (Mensal).
+export function condicoesPagamento(f, adendas, parametros, per, contrato = contratoNoPeriodo(f, adendas, per)) {
+  const codigo = normalizarCodigo(campo(f, "Codigo")), empresa = texto(campo(f, "Empresa")), nome = texto(campo(f, "Nome"));
+  const profissao = texto(campo(f, "Profissao", "Profissão"));
+  const regime = texto(vigente(adendas, f, "RegimePagamento", per.fim, campo(f, "RegimePagamento")));
+  if (!regime) return {erro: "Regime de pagamento vazio para " + empresa + " | " + codigo + " (" + nome + ")."};
+  const baseCadastro = n(campo(f, "Vencimento Base"));
+  const adendaBase = adendaVigente(adendas, empresa, codigo, "Vencimento Base", per.fim);
+  let valorUnitario = 0, unidade = "", origem = "";
+  if (igual(regime, "Hora") || igual(regime, "Diário")) {
+    const t = tarifaVigente(parametros, regime, profissao, per.fim);
+    if (t.erro) return {erro: t.erro + " (" + empresa + " | " + codigo + ")"};
+    valorUnitario = t.valor; unidade = igual(regime, "Hora") ? "MT/hora" : "MT/dia"; origem = "Settings " + regime + " / " + profissao;
+  } else if (igual(regime, "Mensal")) {
+    valorUnitario = adendaBase && numero(adendaBase.valor) !== null ? n(adendaBase.valor) : baseCadastro;
+    unidade = "MT/mês"; origem = adendaBase && numero(adendaBase.valor) !== null ? "Adenda de vencimento" : "Vencimento base do cadastro";
+  } else return {erro: "Regime de pagamento inválido para " + empresa + " | " + codigo + ": «" + regime + "»."};
+  if (!(valorUnitario > 0)) return {erro: "Valor unitário não encontrado para " + empresa + " | " + codigo + " (" + regime + " / " + (profissao || "sem profissão") + "). " +
+    (igual(regime, "Mensal") ? "Verifique o vencimento base do contrato/adenda." : "Verifique as Settings: regime, categoria/profissão e vigência.")};
+  const dias = igual(regime, "Mensal") ? diasSalario30(per.inicio, per.fim, contrato.inicioContrato, contrato.fimContrato) : null;
+  return {profissao, regime, valorUnitario, unidade, origem, inicioContrato: contrato.inicioContrato, fimContrato: contrato.fimContrato, dias, contrato};
+}
+
+// ---------- edição de um lançamento (btnGravarAlteracaoMes_Click) ----------
+export const CAMPOS_EDITAVEIS = [
+  {k: "Canalizar", tipo: "simnao"}, {k: "TotalDependentes", tipo: "inteiro", rotulo: "N.º de dependentes"},
+  {k: "Horas Trabalhadas", tipo: "numero", soHora: true}, {k: "Faltas Justificadas", tipo: "numero"}, {k: "Faltas Injustificadas", tipo: "numero"},
+  {k: "Horas Extras", tipo: "numero"}, {k: "Subsídios", tipo: "numero", grupo: "acrescimo"}, {k: "Bónus", tipo: "numero", grupo: "acrescimo"},
+  {k: "Outros Acréscimos", tipo: "numero", grupo: "acrescimo"}, {k: "Adiantamentos", tipo: "numero", grupo: "desconto"},
+  {k: "Empréstimos", tipo: "numero", grupo: "desconto"}, {k: "Outros Descontos", tipo: "numero", grupo: "desconto"}, {k: "Observações", tipo: "texto"}];
+const decimal = v => { const t = texto(v).replace(/\s/g, ""); if (!t) return 0; const x = Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t); return Number.isFinite(x) ? x : NaN; };
+export const lancamentoFinalizado = l => igual(campo(l, "Estado do Lançamento"), "Finalizado");
+
+// Devolve {erros, linha}: linha = pedido para o script (modo "editar") com as entradas mensais
+// e as condições de pagamento sincronizadas com o contrato/adendas, como o VBA faz ao gravar.
+export function prepararEdicaoLancamento({original, valores, funcionario, adendas = [], parametros = [], ano, mes, utilizador = "", agora = new Date()}) {
+  const erros = [];
+  if (!original) return {erros: ["Lançamento não encontrado."]};
+  if (lancamentoFinalizado(original)) return {erros: ["Este lançamento está Finalizado e não pode ser alterado."]};
+  const empresa = texto(campo(original, "Empresa")), codigo = normalizarCodigo(campo(original, "Codigo"));
+  if (!empresa || !codigo) return {erros: ["Lançamento sem Empresa/Código."]};
+  if (!funcionario) return {erros: ["Colaborador não encontrado: " + empresa + " | " + codigo + "."]};
+  const per = periodoFolha(Number(ano), Number(mes));
+  const cp = condicoesPagamento(funcionario, adendas, parametros, per);
+  if (cp.erro) return {erros: [cp.erro]};
+  const hora = igual(cp.regime, "Hora");
+  const linha = {Empresa: empresa, Codigo: codigo};
+  for (const c of CAMPOS_EDITAVEIS) {
+    const v = valores[c.k];
+    if (c.tipo === "simnao") {
+      if (!["Sim", "Não"].includes(texto(v))) erros.push("Seleccione Sim ou Não no campo Canalizar.");
+      linha[c.k] = texto(v);
+    } else if (c.tipo === "texto") linha[c.k] = texto(v);
+    else if (c.soHora && !hora) linha[c.k] = "";
+    else {
+      const x = decimal(v);
+      if (!Number.isFinite(x) || x < 0) erros.push("Valor inválido em «" + (c.rotulo || c.k) + "»: use um número igual ou superior a zero.");
+      else if (c.tipo === "inteiro" && !Number.isInteger(x)) erros.push("«" + (c.rotulo || c.k) + "» tem de ser um número inteiro.");
+      linha[c.k] = x;
+    }
+  }
+  linha.RegimePagamento = cp.regime;
+  linha["Valor Unitário"] = cp.valorUnitario;
+  linha["Data Inicio Contrato"] = cp.inicioContrato ? Number(serie(cp.inicioContrato)) : "";
+  linha["Data Fim Contrato"] = cp.fimContrato ? Number(serie(cp.fimContrato)) : "";
+  if (cp.dias !== null) linha["Dias Trabalhados"] = cp.dias;
+  linha["Data Ultima Alteracao"] = Math.round(((agora.getTime() - agora.getTimezoneOffset() * 60000) / 86400000 + 25569) * 100000) / 100000;
+  linha["Utilizador Alteracao"] = utilizador;
+  return {erros, linha, condicoes: cp};
+}
+
 // Prepara as linhas do novo mês exactamente como CriarNovoMes; não grava nada.
 // Devolve {linhas, incluidos, excluidos, erros, avisos}. Com erros, o mês não pode ser criado.
 export function prepararNovoMes({ano, mes, funcionarios, adendas = [], parametros = [], lancamentosMes = [], lancamentosAnterior = [], utilizador = "", agora = new Date()}) {
@@ -170,25 +242,9 @@ export function prepararNovoMes({ano, mes, funcionarios, adendas = [], parametro
     const c = contratoNoPeriodo(f, adendas, per);
     if (!c.vigente) { excluidos.push({...id, motivo: c.motivo}); continue; }
 
-    const profissao = texto(campo(f, "Profissao", "Profissão"));
-    const regime = texto(vigente(adendas, f, "RegimePagamento", per.fim, campo(f, "RegimePagamento")));
-    if (!regime) { erros.push("Regime de pagamento vazio para " + empresa + " | " + codigo + " (" + nome + ")."); continue; }
-    const baseCadastro = n(campo(f, "Vencimento Base"));
-    const adendaBase = adendaVigente(adendas, empresa, codigo, "Vencimento Base", per.fim);
-    let valorUnitario = 0, unidade = "", origem = "";
-    if (igual(regime, "Hora") || igual(regime, "Diário")) {
-      const t = tarifaVigente(parametros, regime, profissao, per.fim);
-      if (t.erro) { erros.push(t.erro + " (" + empresa + " | " + codigo + ")"); continue; }
-      valorUnitario = t.valor; unidade = igual(regime, "Hora") ? "MT/hora" : "MT/dia"; origem = "Settings " + regime + " / " + profissao;
-    } else if (igual(regime, "Mensal")) {
-      valorUnitario = adendaBase && numero(adendaBase.valor) !== null ? n(adendaBase.valor) : baseCadastro;
-      unidade = "MT/mês"; origem = adendaBase && numero(adendaBase.valor) !== null ? "Adenda de vencimento" : "Vencimento base do cadastro";
-    } else { erros.push("Regime de pagamento inválido para " + empresa + " | " + codigo + ": «" + regime + "»."); continue; }
-    if (!(valorUnitario > 0)) {
-      erros.push("Valor unitário não encontrado para " + empresa + " | " + codigo + " (" + regime + " / " + (profissao || "sem profissão") + "). " +
-        (igual(regime, "Mensal") ? "Verifique o vencimento base do contrato/adenda." : "Verifique as Settings: regime, categoria/profissão e vigência."));
-      continue;
-    }
+    const cp = condicoesPagamento(f, adendas, parametros, per, c);
+    if (cp.erro) { erros.push(cp.erro); continue; }
+    const {profissao, regime, valorUnitario, unidade, origem} = cp;
 
     const ant = indice.get(chaveRH(empresa, codigo));
     const linha = {

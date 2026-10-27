@@ -183,7 +183,7 @@ export function iniciarLancamentos(ctx) {
   async function acompanhar(total, ano, mes, t) {
     const barra = el("progress", {max: total, value: 0}), estado = el("p", {class: "loading-line", text: "Pedido aceite. O Power Automate está a gravar " + total + " linhas na tbl_lançamento…"});
     $("rel-body").replaceChildren(el("div", {class: "nm-progresso"}, el("h3", {text: "A criar " + M.NOME_MES[mes - 1] + " " + ano}), barra, estado,
-      el("p", {class: "help", text: "Pode fechar esta janela: a gravação continua no Power Automate. Cada linha demora cerca de 1 segundo."})));
+      el("p", {class: "help", text: "Pode fechar esta janela: a gravação continua no Power Automate (o mês é gravado num só bloco pelo Office Script)."})));
     accoes([{texto: "Fechar", click: fechar}]);
     const inicio = Date.now();
     while (Date.now() - inicio < 20 * 60000) {
@@ -208,5 +208,83 @@ export function iniciarLancamentos(ctx) {
     estado.textContent = "A gravação está a demorar mais do que o previsto. Consulte o histórico de execuções do RH_API_Actualizar.";
   }
 
-  return {preVisualizar, exportarFolha, comparativo, novoMes};
+
+  // ---------- editar um lançamento e finalizar o mês (G_Colaboradores: btnGravarAlteracaoMes / btnFinalizarMes) ----------
+  const campoUrl = () => el("label", {class: "nm-url", hidden: Boolean(ctx.urlGravacao())}, "Endereço do fluxo RH_API_Actualizar",
+    el("input", {type: "url", id: "nm-url", autocomplete: "off", placeholder: "https://…powerplatform.com/…&sig=…"}));
+  function guardarUrlSePreciso() {
+    const c = $("nm-url");
+    if (c && !c.closest("label").hidden && c.value.trim()) ctx.guardarUrlGravacao(c.value);
+    if (!ctx.urlGravacao()) throw Error("Falta o endereço do fluxo RH_API_Actualizar (peça-o ao administrador).");
+  }
+  const agoraSerie = () => { const a = new Date(); return Math.round(((a.getTime() - a.getTimezoneOffset() * 60000) / 86400000 + 25569) * 100000) / 100000; };
+
+  function editar(original) {
+    const {ano, mes} = ctx.periodo();
+    const v = k => M.campo(original, k);
+    const regime = String(v("RegimePagamento") || "");
+    const hora = /^hora$/i.test(regime.trim());
+    const fechado = F.lancamentoFinalizado(original), pode = ctx.podeGravar();
+    abrir({eyebrow: "LANÇAMENTO · " + M.NOME_MES[mes - 1].toUpperCase() + " " + ano, titulo: M.normalizarCodigo(v("Codigo")) + " · " + (v("Nome") || ""),
+      sub: [v("Empresa"), v("Departamento"), regime, v("Estado do Lançamento") || "—"].filter(Boolean).join("  ·  ")});
+    const num = x => { const n = M.numero(x); return n == null ? "—" : fmt(n); };
+    const entrada = c => {
+      const atual = v(c.k);
+      if (c.tipo === "simnao") return el("label", {}, "Canalizar", el("select", {id: "le-" + c.k, disabled: fechado || !pode},
+        el("option", {value: "", text: "—"}), el("option", {value: "Sim", text: "Sim"}), el("option", {value: "Não", text: "Não"})));
+      if (c.tipo === "texto") return el("label", {class: "span-2"}, c.k, el("textarea", {id: "le-" + c.k, rows: 2, value: atual ?? "", disabled: fechado || !pode}));
+      const off = fechado || !pode || (c.soHora && !hora);
+      return el("label", {}, c.rotulo || c.k, el("input", {id: "le-" + c.k, type: "text", inputMode: "decimal", value: off && c.soHora && !hora ? "" : (atual ?? ""), disabled: off,
+        placeholder: c.soHora && !hora ? "Só regime Hora" : "0"}));
+    };
+    const grupo = (titulo, filtro) => el("fieldset", {class: "le-grupo"}, el("legend", {text: titulo}), ...F.CAMPOS_EDITAVEIS.filter(filtro).map(entrada));
+    $("rel-body").replaceChildren(
+      el("div", {class: "stats compact-stats rel-stats"},
+        cartao("Dias trabalhados", num(v("Dias Trabalhados")), hora ? "regime Hora" : "automático (21–20)"), cartao("Dias de férias", num(v("Dias de Férias")), "automático"),
+        cartao("Valor unitário", num(v("Valor Unitário")), "contrato/adenda ou Settings"), cartao("INSS colab.", num(v("INSS Colaborador")), "fórmula"),
+        cartao("IRPS", num(v("IRPS")), "fórmula"), cartao("Líquido", num(v("Salario Liquido")), "fórmula")),
+      fechado ? el("p", {class: "notice-inline", text: "Este lançamento está Finalizado: só consulta."}) :
+        !pode ? el("p", {class: "notice-inline", text: "O seu perfil só permite consultar. Alterar exige Superadministrador ou Administrador RH."}) :
+        el("p", {class: "help", text: "Ao gravar, o regime, o valor unitário, as datas do contrato e os dias (Mensal) são recalculados com o contrato e as adendas vigentes; o estado passa a «Alterado». Vencimento, INSS, IRPS e líquido continuam a ser calculados pelas fórmulas do Excel."}),
+      el("div", {class: "le-form"},
+        grupo("Presença", c => !c.grupo && c.tipo !== "texto"), grupo("Acréscimos", c => c.grupo === "acrescimo"), grupo("Descontos", c => c.grupo === "desconto"),
+        grupo("Observações", c => c.tipo === "texto")),
+      campoUrl());
+    const canal = $("le-Canalizar"); if (canal) canal.value = ["Sim", "Não"].includes(String(v("Canalizar"))) ? String(v("Canalizar")) : "";
+    const lista = [{texto: "Fechar", click: fechar}];
+    if (!fechado && pode) lista.unshift({texto: "Gravar alteração", classe: "primary", ocupado: "A gravar…", click: async () => {
+      const valores = Object.fromEntries(F.CAMPOS_EDITAVEIS.map(c => [c.k, $("le-" + c.k)?.value ?? ""]));
+      const [funcionarios, contratos] = await Promise.all([ctx.funcionarios(), ctx.contratos()]);
+      const chave = M.chaveRH(v("Empresa"), v("Codigo"));
+      const funcionario = funcionarios.find(f => M.chaveRH(M.campo(f, "Empresa"), M.campo(f, "Codigo")) === chave);
+      const r = F.prepararEdicaoLancamento({original, valores, funcionario, adendas: contratos.adendas, parametros: contratos.parametros, ano, mes, utilizador: ctx.utilizador()});
+      if (r.erros.length) throw Error(r.erros.join(" "));
+      guardarUrlSePreciso();
+      await ctx.gravarLancamento({ano, mes, mesNome: M.NOME_MES[mes - 1], linha: r.linha});
+      fechar();
+      ctx.aviso("Alteração gravada: " + chave.replace("|", " | ") + ". Fórmulas recalculadas no Excel.");
+      ctx.recarregarMes(ano, mes);
+    }});
+    accoes(lista);
+  }
+
+  function finalizar() {
+    const {ano, mes} = ctx.periodo();
+    const nome = M.NOME_MES[mes - 1] + "/" + ano;
+    const linhas = ctx.lancamentosMes();
+    const abertas = linhas.filter(l => !F.lancamentoFinalizado(l)).length;
+    abrir({eyebrow: "FINALIZAR MÊS", titulo: "Finalizar " + nome, sub: linhas.length + " lançamento(s) · " + abertas + " por finalizar"});
+    $("rel-body").replaceChildren(
+      el("p", {text: abertas ? "Todos os lançamentos de " + nome + " passam a «Finalizado» e «Revisto = Sim». Depois de finalizados ficam apenas para consulta." : "Este período já está Finalizado."}),
+      campoUrl());
+    const pode = ctx.podeGravar();
+    accoes([{texto: "Finalizar " + nome, classe: "primary", ocupado: "A finalizar…", desactivado: !abertas || !pode, titulo: !pode ? "Só Superadministrador ou Administrador RH" : "",
+      click: async () => {
+        guardarUrlSePreciso();
+        const r = await ctx.finalizarMes({ano, mes, mesNome: M.NOME_MES[mes - 1], utilizador: ctx.utilizador(), agoraSerie: agoraSerie()});
+        fechar(); ctx.aviso(r.alteradas + " lançamentos finalizados em " + nome + "."); ctx.recarregarMes(ano, mes);
+      }}, {texto: "Fechar", click: fechar}]);
+  }
+
+  return {preVisualizar, exportarFolha, comparativo, novoMes, editar, finalizar};
 }
