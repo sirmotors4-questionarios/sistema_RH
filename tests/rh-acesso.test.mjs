@@ -99,4 +99,6 @@ test('gravarLancamento e finalizarMes enviam a acção e as linhas', async () =>
   const comLinha = async () => ({status: 200, ok: true, json: async () => ({ok: true, alteradas: 1, linha: {Codigo: '0031', 'Salario Liquido': 1234.5}})});
   const r = await gravarLancamento({ano: 2026, mes: 4, mesNome: 'Abril', linha: {Empresa: 'A', Codigo: '0031'}}, {credenciais, url: URL_OK, fetchImpl: comLinha});
   assert.equal(r.linha['Salario Liquido'], 1234.5);
+  const comTexto = async () => ({status: 200, ok: true, json: async () => ({ok: true, alteradas: 1, linha: JSON.stringify({Codigo: '0031', 'Salario Liquido': 99})})});
+  assert.equal((await gravarLancamento({ano: 2026, mes: 4, mesNome: 'Abril', linha: {Empresa: 'A', Codigo: '0031'}}, {credenciais, url: URL_OK, fetchImpl: comTexto})).linha['Salario Liquido'], 99);
 });

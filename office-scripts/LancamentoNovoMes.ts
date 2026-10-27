@@ -20,7 +20,7 @@ interface Resultado {
   colunasFormula: string[];
   ms: number;
   filtrosLimpos?: boolean;
-  linha?: Record<string, string | number | boolean>;
+  linha?: string; // JSON da linha recalculada (o Excel não aceita objectos genéricos no retorno)
 }
 const TABELA = "tbl_lançamento";
 const LIMITE_LINHAS = 2000;
@@ -139,8 +139,9 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     definir(i, "Estado do Lançamento", "Alterado");
     // Devolve a linha já recalculada (Vencimento, INSS, IRPS, Líquido…) para o site actualizar só esta linha.
     const valores = corpo.getRow(i).getValues()[0];
-    r.linha = {};
-    cab.forEach((h, j) => { r.linha[h] = valores[j]; });
+    const obj: { [k: string]: string | number | boolean } = {};
+    cab.forEach((h, j) => { obj[h] = valores[j]; });
+    r.linha = JSON.stringify(obj);
     r.alteradas = 1;
     r.ok = true;
     return fim();
