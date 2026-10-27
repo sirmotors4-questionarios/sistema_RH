@@ -111,3 +111,53 @@ test('relatório comparativo: grupos, variação, peso e comentários', () => {
   assert.match(adm.comentario, /Entrada de Eva/); assert.match(adm.comentario, /Saída de Rui/);
   assert.match(adm.comentario, /Aumento global de 10 horas \(\+800,00 MT\)/);
 });
+
+test('novo mês: contrato e adendas no período 21–20 (admissão, saída, renovação, vencimento)', () => {
+  const S = d => F.serie(d);
+  const ad = (Codigo, Campo_Alterado, Valor_Novo, ini, extra = {}) => ({Codigo, Empresa: 'A', Campo_Alterado, Valor_Novo, Estado_Adenda: 'Activa', Data_Inicio_Vigencia: S(ini), ...extra});
+  const base = {Empresa: 'A', Estado: 'Activo', RegimePagamento: 'Mensal', 'Vencimento Base': '20000', TipoContrato: 'Efectivo', 'Data Admissao': S('2020-01-01'), Profissao: 'Técnico'};
+  const funcionarios = [
+    {...base, Codigo: '10', Nome: 'Admitido a meio', 'Data Admissao': S('2026-04-06')},            // 06/04 a 20/04 = 15 dias
+    {...base, Codigo: '11', Nome: 'Saída por adenda'},                                              // saída 31/03 por adenda = 11 dias
+    {...base, Codigo: '12', Nome: 'Saiu antes do período', Estado: 'Inactivo', 'Data de Saída': S('2026-03-20')},
+    {...base, Codigo: '13', Nome: 'Admitido depois', 'Data Admissao': S('2026-04-21')},
+    {...base, Codigo: '14', Nome: 'Prazo renovado por adenda', TipoContrato: 'Prazo', 'Data Fim Contrato': S('2026-03-31')},
+    {...base, Codigo: '15', Nome: 'Prazo terminado sem renovação', TipoContrato: 'Prazo', 'Data Fim Contrato': S('2026-03-31')},
+    {...base, Codigo: '16', Nome: 'Aumento por adenda'},
+    {...base, Codigo: '17', Nome: 'Adenda anulada ignorada'}
+  ];
+  const adendas = [
+    ad('11', 'Data de Saída', S('2026-03-31'), '2026-03-25'),
+    ad('14', 'Data Fim Contrato', S('2026-12-31'), '2026-03-15'),
+    ad('16', 'Vencimento Base', '26000', '2026-04-01'),
+    ad('17', 'Vencimento Base', '99999', '2026-04-01', {Estado_Adenda: 'Anulada'})
+  ];
+  const r = F.prepararNovoMes({ano: 2026, mes: 4, funcionarios, adendas});
+  assert.deepEqual(r.erros, []);
+  const L = c => r.linhas.find(l => l.Codigo === c);
+  assert.equal(L('0010')['Dias Trabalhados'], '15');
+  assert.equal(L('0011')['Dias Trabalhados'], '11');
+  assert.equal(L('0011')['Data Fim Contrato'], S('2026-03-31'));
+  assert.equal(L('0012'), undefined);
+  assert.equal(L('0013'), undefined);
+  assert.equal(L('0014')['Dias Trabalhados'], '30');
+  assert.equal(L('0015')['Dias Trabalhados'], '11');            // prazo 31/03 dentro do período: 21/03 a 31/03
+  assert.equal(L('0016')['Valor Unitário'], '26000');
+  assert.equal(L('0017')['Valor Unitário'], '20000');
+  const exc = Object.fromEntries(r.excluidos.map(e => [e.codigo, e.motivo]));
+  assert.match(exc['0012'], /cessado/);
+  assert.match(exc['0013'], /Admissão posterior/);
+});
+
+test('adendas antigas (cabeçalho + detalhes) contam como no VBA', () => {
+  const S = d => F.serie(d);
+  const cab = [{ID_Adenda: 'AD-1', Codigo: '20', Empresa: 'A', Estado_Adenda: 'Aplicada', Data_Inicio_Vigencia: S('2026-03-10')},
+               {ID_Adenda: 'AD-2', Codigo: '20', Empresa: 'A', Estado_Adenda: 'Anulada', Data_Inicio_Vigencia: S('2026-03-12')}];
+  const det = [{ID_Adenda: 'AD-1', Campo_Alterado: 'Data de Saída', Valor_Novo: S('2026-04-05')},
+               {ID_Adenda: 'AD-2', Campo_Alterado: 'Data de Saída', Valor_Novo: S('2026-03-22')}];
+  const todas = F.unirAdendas([], cab, det);
+  assert.equal(todas.length, 2);
+  const f = {Codigo: '20', Empresa: 'A', Nome: 'X', Estado: 'Activo', RegimePagamento: 'Mensal', 'Vencimento Base': '15000', TipoContrato: 'Efectivo', 'Data Admissao': S('2019-01-01')};
+  const r = F.prepararNovoMes({ano: 2026, mes: 4, funcionarios: [f], adendas: todas});
+  assert.equal(r.linhas[0]['Dias Trabalhados'], '16');   // 21/03 a 05/04; a adenda anulada é ignorada
+});

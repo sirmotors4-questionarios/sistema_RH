@@ -54,6 +54,21 @@ export function adendaVigente(adendas, empresa, codigo, campoAlterado, dataRef) 
   }
   return melhor;
 }
+// Adendas no formato antigo (tbl_adendas_colaborador + tbl_adendas_detalhes), como RH_ProcurarAdendaLegacy:
+// cada detalhe herda Código, Empresa, estado e vigência do cabeçalho com o mesmo ID_Adenda.
+export function unirAdendas(unificadas = [], cabecalhos = [], detalhes = []) {
+  const porId = new Map();
+  for (const c of cabecalhos) { const id = texto(campo(c, "ID_Adenda")); if (id) porId.set(id.toUpperCase(), c); }
+  const legadas = [];
+  for (const d of detalhes) {
+    const c = porId.get(texto(campo(d, "ID_Adenda")).toUpperCase());
+    if (!c) continue;
+    legadas.push({Codigo: campo(c, "Codigo"), Empresa: campo(c, "Empresa"), Estado_Adenda: campo(c, "Estado_Adenda"),
+      Data_Adenda: campo(c, "Data_Adenda"), Data_Inicio_Vigencia: campo(c, "Data_Inicio_Vigencia"), Data_Fim_Vigencia: campo(c, "Data_Fim_Vigencia"),
+      Campo_Alterado: campo(d, "Campo_Alterado"), Valor_Novo: campo(d, "Valor_Novo"), ID_Adenda: campo(c, "ID_Adenda")});
+  }
+  return [...unificadas, ...legadas];
+}
 const vigente = (ad, f, campoAlterado, dataRef, valorCadastro) => {
   const a = adendaVigente(ad, campo(f, "Empresa"), campo(f, "Codigo"), campoAlterado, dataRef);
   return a ? a.valor : valorCadastro;
