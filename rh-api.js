@@ -50,6 +50,7 @@ export async function callApi(action, {getToken, credenciais, params, fetchImpl 
   try { body = await response.json(); } catch { body = null; }
   if (response.status === 401) throw new ApiError('Sessão Microsoft inválida ou expirada. Inicie sessão novamente.', 401, 'RH_AUTH');
   if (response.status === 403) {
+    if (credenciais && body?.erro) throw new ApiError(body.erro, 403, 'RH_FORBIDDEN');
     if (credenciais) throw new ApiError('E-mail ou código de acesso inválidos, ou conta não activa em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
     const quem = body?.email ? ' (' + body.email + ')' : '';
     throw new ApiError('A sua conta' + quem + ' não está autorizada no Sistema RH. Peça a um Superadministrador para a registar em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
@@ -112,4 +113,28 @@ export async function gravarColaborador(modo, {alvo, dados} = {}, deps = {}) {
   if (!alvo?.Empresa || !alvo?.Codigo) throw new ApiError('Falta a Empresa ou o Código do colaborador.', 0, 'RH_ACTION');
   const body = await callApi('colaborador_gravar', {...deps, params: {modo, alvo, dados}});
   return {modo: body.modo || modo, codigo: body.codigo || alvo.Codigo, empresa: body.empresa || alvo.Empresa};
+}
+
+// Novo mês (fluxo RH_API_Actualizar, acção lancamento_novo_mes): o site prepara as linhas com as regras do VBA
+// (rh-folha.js) e o fluxo responde 202 logo que aceita o pedido; a gravação continua no Power Automate.
+export async function gravarNovoMes({ano, mes, mesNome, linhas} = {}, deps = {}) {
+  if (!Array.isArray(linhas) || !linhas.length) throw new ApiError('Não há lançamentos para gravar.', 0, 'RH_ACTION');
+  const body = await callApi('lancamento_novo_mes', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas}});
+  return {total: Number(body.total) || linhas.length, modo: body.modo};
+}
+
+// Edição de um lançamento do mês (Office Script, modo "editar"): só as entradas mensais e as condições
+// sincronizadas com o contrato. O fluxo responde com o resultado do script ({ok, alteradas}).
+export async function gravarLancamento({ano, mes, mesNome, linha} = {}, deps = {}) {
+  if (!linha || !linha.Empresa || !linha.Codigo) throw new ApiError('Lançamento sem Empresa/Código.', 0, 'RH_ACTION');
+  const body = await callApi('lancamento_editar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas: [linha]}});
+  return {alteradas: Number(body.alteradas) || 1};
+}
+
+// Finalizar mês (modo "finalizar"): todos os lançamentos do mês passam a Finalizado / Revisto = Sim.
+export async function finalizarMes({ano, mes, mesNome, utilizador = '', agoraSerie = ''} = {}, deps = {}) {
+  if (!mesNome) throw new ApiError('Mês inválido.', 0, 'RH_ACTION');
+  const body = await callApi('lancamento_finalizar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome,
+    linhas: [{'Utilizador Alteracao': utilizador, 'Data Ultima Alteracao': agoraSerie}]}});
+  return {alteradas: Number(body.alteradas) || 0};
 }

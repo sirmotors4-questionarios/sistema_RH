@@ -80,6 +80,14 @@ Os nomes chegam exactamente como os cabeçalhos do Excel, **incluindo espaços e
 - Listas com os valores que já existem na coluna; Sexo `Masculino`/`Feminino`; Estado `Activo`/`Inactivo`; Regime `Mensal`/`Hora`/`Diário`. Com Hora/Diário o vencimento base fica vazio e a ficha mostra o valor unitário vigente das Settings (`tbl_parametros_pagamento`).
 - O site usa os cabeçalhos reais de `tbl_funcionarios` (ex.: `Data EmissaoBI`, `ValidadeBI`, `NIB/Conta`, `T. Documento`). Colunas calculadas (`Idade`, `Anos de Trabalho`, `INSS…`, `IRPS`, `Salario Liquido`, `Chave_RH`) nunca são escritas.
 
+### Lançamento salarial (folha, comparativo e Novo mês)
+Regras em `rh-folha.js` (réplica do VBA), ecrãs em `lancamentos-ui.js`, ficheiros em `rh-export.js` (ExcelJS 4.4.0, jsPDF 2.5.2 e jspdf-autotable 3.8.4, carregados do jsDelivr só quando se exporta).
+
+- **Pré-visualização / Folha em PDF / Folha em Excel**: mês carregado + filtros Empresa, Departamento e Colaborador. Colunas e totais do `modRH_ExportarFolha` (Func., Nome, Categoria, Vencimento Base, Dias/Valor de Falta, Vencimento, Sub. Férias, Outras Rem., Total Rem., IRPS, INSS, Outros desc, Total Desc., Líq. MT), totais efectivos do `modRH_CalculosResumo`, rodapé "Impresso por", assinaturas e A4 horizontal.
+- **Relatório comparativo**: mês seleccionado vs anterior, por Empresa – Departamento, base Salário Líquido; comentários de entradas, saídas, transferências, faltas e horas (`modRH_RelatorioComparativo`). Excel `Relatorio_Comparativo_AAAA_MM.xlsx` ou PDF.
+- **Novo mês** (`CriarNovoMes`): período 21–20; mês ainda inexistente; colaboradores activos com Código/Empresa únicos; contrato vigente no período (admissão, saída, prazo, estado e adendas activas); regime e valor unitário (Mensal = vencimento do contrato/adenda; Hora/Diário = Settings por regime + profissão + vigência); Mensal com dias base 30; cópia das entradas do mês anterior ou entradas a zero; estado Pendente, Revisto Não, `ID_Lancamento = AAAA-MM-EMPRESA-CODIGO`. O site mostra a verificação (a lançar, excluídos com motivo, bloqueios) antes de gravar.
+- Gravação: `POST {"action":"lancamento_novo_mes","ano","mes","mesNome","linhas":[…]}` para o **RH_API_Actualizar**. O fluxo confirma o perfil, recusa se já houver linhas `ID_Lancamento` começadas por `AAAA-MM-` (409), responde **202** e depois grava cada linha (Apply to each, 1 de cada vez) na `tbl_lançamento`, sem tocar nas colunas de fórmulas (Estado, Estado de Reforma, Vencimento Base, INSS, Total INSS, Salario Liquido, Totais, IRPS, Vencimento). O site acompanha a gravação e avisa se as fórmulas não se estenderam às novas linhas.
+
 ### Fluxo de gravação (RH_API_Actualizar)
 `POST {"action":"colaborador_gravar", "email", "chave", "modo":"criar"|"editar", "alvo":{"Empresa","Codigo"}, "dados":{cabeçalho: valor}}`
 

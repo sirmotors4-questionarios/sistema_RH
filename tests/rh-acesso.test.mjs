@@ -83,3 +83,16 @@ test('gravarColaborador envia modo e dados; 409 vira erro legível; URL de grava
   A.guardarUrlGravacao(URL_OK.replace('TESTE', 'GRAVAR'));
   assert.equal(A.urlGravacao(), URL_OK.replace('TESTE', 'GRAVAR'));
 });
+
+test('gravarLancamento e finalizarMes enviam a acção e as linhas', async () => {
+  const {gravarLancamento, finalizarMes} = await import('../rh-api.js');
+  let corpo;
+  const credenciais = {email: 'a@b.co', chave: 'f'.repeat(64)};
+  const ok = async (u, init) => { corpo = JSON.parse(init.body); return {status: 200, ok: true, json: async () => ({ok: true, modo: 'editar', alteradas: 1})}; };
+  assert.deepEqual(await gravarLancamento({ano: 2026, mes: 4, mesNome: 'Abril', linha: {Empresa: 'A', Codigo: '0031', 'Bónus': 10}}, {credenciais, url: URL_OK, fetchImpl: ok}), {alteradas: 1});
+  assert.equal(corpo.action, 'lancamento_editar'); assert.equal(corpo.linhas[0].Codigo, '0031'); assert.equal(corpo.mesNome, 'Abril');
+  await finalizarMes({ano: 2026, mes: 4, mesNome: 'Abril', utilizador: 'a@b.co', agoraSerie: 46000}, {credenciais, url: URL_OK, fetchImpl: ok});
+  assert.equal(corpo.action, 'lancamento_finalizar'); assert.equal(corpo.linhas[0]['Utilizador Alteracao'], 'a@b.co');
+  const fin = async () => ({status: 409, ok: false, json: async () => ({ok: false, erro: 'este lançamento está Finalizado e não pode ser alterado'})});
+  await assert.rejects(gravarLancamento({ano: 2026, mes: 4, mesNome: 'Abril', linha: {Empresa: 'A', Codigo: '1'}}, {credenciais, url: URL_OK, fetchImpl: fin}), /Finalizado/);
+});
