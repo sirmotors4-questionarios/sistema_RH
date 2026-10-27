@@ -1,4 +1,5 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
+import {iniciarRelatorios} from "./relatorios-ui.js";
 import {iniciarPainel} from "./painel.js";
 import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
@@ -36,6 +37,7 @@ function go(page){
  window.scrollTo({top:0,behavior:"instant"});
  if(ligado)(precisa[page]||[]).forEach(m=>carregar(m));
  if(page==="painel")painel.abrir();
+ if(page==="relatorios")relatorios.abrir();
 }
 document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go)));
@@ -313,9 +315,10 @@ function ligar(quem,via){
  estadoLigacao("live","Sessão iniciada: "+quem,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate ("+via+"). Os administradores RH podem criar e editar colaboradores; os restantes módulos são só de consulta.");
  (precisa[paginaActual]||[]).forEach(m=>carregar(m));
  if(paginaActual==="painel")painel.abrir();
+ if(paginaActual==="relatorios")relatorios.abrir();
 }
 function desligar(){
- painel.limpar();
+ painel.limpar();relatorios.limpar();
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
@@ -399,6 +402,15 @@ const painel=iniciarPainel({
  funcionarios:forcar=>carregar("funcionarios",forcar).then(()=>linhas("funcionarios","tbl_funcionarios")),
  carregarMes:(ano,mes,forcar)=>carregarMes(ano,mes,forcar),
  periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null)
+});
+// ---------- Relatórios formais (PDF e Word) ----------
+const relatorios=iniciarRelatorios({
+ ligado:()=>ligado,
+ funcionarios:()=>carregar("funcionarios").then(()=>linhas("funcionarios","tbl_funcionarios")),
+ carregarMes:(ano,mes)=>carregarMes(ano,mes),
+ periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null),
+ utilizador:()=>utilizadorActual?.nome||sessaoAcesso()?.email||"",
+ aviso:showToast
 });
 $("btn-preview").addEventListener("click",()=>lanc.preVisualizar());
 $("btn-pdf").addEventListener("click",e=>{const b=e.currentTarget;b.disabled=true;lanc.exportarFolha("pdf").catch(x=>showToast(x.message)).finally(()=>b.disabled=false)});
