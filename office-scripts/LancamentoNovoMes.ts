@@ -82,23 +82,6 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
 
   const corpo = tabela.getRangeBetweenHeaderAndTotal();
   const nLinhas = tabela.getRowCount();
-  if (nLinhas === 0) { r.erros.push("tabela sem linhas: não é possível obter as fórmulas de referência"); return fim(); }
-  const todas = corpo.getFormulasR1C1();
-  const formulasRef: string[] = cab.map((_, j) => {
-    const conta = new Map<string, number>();
-    for (const l of todas) { const f = String(l[j]); if (f.startsWith("=")) conta.set(f, (conta.get(f) ?? 0) + 1); }
-    let melhor = "", n = 0;
-    conta.forEach((v, f) => { if (v > n) { melhor = f; n = v; } });
-    return melhor;
-  });
-  const ehFormula = formulasRef.map(f => f !== "");
-  r.colunasFormula = cab.filter((_, i) => ehFormula[i]);
-  for (const c of PROTEGIDAS) {
-    if (idx(c) < 0) r.erros.push(`coluna calculada ${c} em falta`);
-    else if (!ehFormula[idx(c)]) r.erros.push(`coluna ${c} devia ter fórmula e não tem`);
-  }
-  if (r.erros.length) return fim();
-
   const col = (n: string) => corpo.getColumn(idx(n)).getValues().map(v => v[0]);
   const [e, c, a, m] = CHAVE.map(n => col(n));
   const linhasPorChave = new Map<string, number[]>();
@@ -157,6 +140,25 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     r.ok = true;
     return fim();
   }
+
+  // Só o novo mês precisa das fórmulas de referência: ler as fórmulas de toda a tabela é o passo mais
+  // pesado do script, por isso editar e finalizar não o fazem.
+  if (nLinhas === 0) { r.erros.push("tabela sem linhas: não é possível obter as fórmulas de referência"); return fim(); }
+  const todas = corpo.getFormulasR1C1();
+  const formulasRef: string[] = cab.map((_, j) => {
+    const conta = new Map<string, number>();
+    for (const l of todas) { const f = String(l[j]); if (f.startsWith("=")) conta.set(f, (conta.get(f) ?? 0) + 1); }
+    let melhor = "", n = 0;
+    conta.forEach((v, f) => { if (v > n) { melhor = f; n = v; } });
+    return melhor;
+  });
+  const ehFormula = formulasRef.map(f => f !== "");
+  r.colunasFormula = cab.filter((_, i) => ehFormula[i]);
+  for (const c of PROTEGIDAS) {
+    if (idx(c) < 0) r.erros.push(`coluna calculada ${c} em falta`);
+    else if (!ehFormula[idx(c)]) r.erros.push(`coluna ${c} devia ter fórmula e não tem`);
+  }
+  if (r.erros.length) return fim();
 
   const vistas = new Set<string>();
   const desconhecidas = new Set<string>();
