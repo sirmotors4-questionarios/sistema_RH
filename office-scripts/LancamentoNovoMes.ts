@@ -19,6 +19,7 @@ interface Resultado {
   erros: string[];
   colunasFormula: string[];
   ms: number;
+  filtrosLimpos?: boolean;
 }
 const TABELA = "tbl_lançamento";
 const LIMITE_LINHAS = 2000;
@@ -187,6 +188,9 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   if (r.erros.length) return fim();
   if (r.modo === "validar") { r.ok = true; return fim(); }
 
+  // Excel recusa addRows numa tabela filtrada (InsertDeleteConflict): limpa o filtro (só a vista, não os dados).
+  const filtro = tabela.getAutoFilter();
+  if (filtro && filtro.getIsDataFiltered()) { filtro.clearCriteria(); r.filtrosLimpos = true; }
   tabela.addRows(undefined, matriz);
   const novo = corpo.getWorksheet().getRangeByIndexes(
     corpo.getRowIndex() + nLinhas, corpo.getColumnIndex(), matriz.length, cab.length);
