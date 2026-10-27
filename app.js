@@ -40,27 +40,46 @@ document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",(
 $("menu-toggle").addEventListener("click",()=>$("sidebar").classList.toggle("open"));
 function showToast(message){const t=$("toast");t.textContent=message;t.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>t.classList.remove("show"),4500)}
 // ---------- lançamentos gravados em segundo plano: o Excel Online demora ~15–20 s por gravação ----------
-const pendentes=new Map(); // "ano-mes|Empresa|Codigo" -> {inicio, fim?, erro?}
+// As gravações vão em fila (uma de cada vez no mesmo ficheiro) e o mês só é relido quando a fila do mês acaba:
+// assim nenhuma alteração se perde nem é tapada por uma leitura feita antes de ela chegar ao Excel.
+const pendentes=new Map(); // "ano-mes|Empresa|Codigo" -> {inicio, emFila, fim?, erro?}
+let filaGravacao=Promise.resolve();
 const segs=ms=>Math.max(0,Math.round(ms/1000));
-function rotuloPendente(p){if(p.erro)return"Erro ao gravar";if(p.fim)return"Gravado · "+segs(p.fim-p.inicio)+" s";return"A gravar… "+segs(Date.now()-p.inicio)+" s"}
+function rotuloPendente(p){if(p.erro)return"Erro ao gravar";if(p.fim)return"Gravado · "+segs(p.fim-p.inicio)+" s";return(p.emFila?"Na fila… ":"A gravar… ")+segs(Date.now()-p.inicio)+" s"}
 function gravacaoActiva(k){const p=pendentes.get(k);return Boolean(p&&!p.fim&&!p.erro)}
 function actualizarPendentes(){
  document.querySelectorAll("[data-pendente]").forEach(b=>{const p=pendentes.get(b.dataset.pendente);if(p)b.textContent=rotuloPendente(p)});
  if(![...pendentes.keys()].some(gravacaoActiva)){clearInterval(actualizarPendentes.timer);actualizarPendentes.timer=null}
 }
+async function relerMesSeLivre(ano,mes){
+ const pre=ano+"-"+mes+"|";
+ if([...pendentes.keys()].some(k=>k.startsWith(pre)&&gravacaoActiva(k)))return; // ainda há gravações deste mês na fila
+ try{await pedidos.lancamentos}catch{} // uma leitura já em curso foi pedida antes da gravação: espera e lê de novo
+ meses.delete(ano+"-"+mes);mesesCompletos=false;
+ try{await carregarLancamentos({ano,mes})}catch{}
+ if([...pendentes.keys()].some(k=>k.startsWith(pre)&&gravacaoActiva(k)))return;
+ for(const[k,p]of pendentes)if(k.startsWith(pre)&&p.fim&&!p.erro)pendentes.delete(k);
+ renderSalarios();
+}
 function gravarEmFundo({ano,mes,chave,pedido}){
  const k=ano+"-"+mes+"|"+chave,quem=chave.replace("|"," | ");
  if(gravacaoActiva(k)){showToast("Este lançamento ainda está a ser gravado.");return}
- const p={inicio:Date.now()};pendentes.set(k,p);renderSalarios();showToast("A gravar "+quem+"… O Excel demora cerca de 15–20 s; pode continuar a trabalhar.");
+ const naFila=[...pendentes.keys()].filter(gravacaoActiva).length;
+ const p={inicio:Date.now(),emFila:naFila>0};pendentes.set(k,p);renderSalarios();
+ showToast(naFila?"Na fila: "+quem+" (grava a seguir às "+naFila+" anterior(es)).":"A gravar "+quem+"… O Excel demora cerca de 15–20 s; pode continuar a trabalhar.");
  if(!actualizarPendentes.timer)actualizarPendentes.timer=setInterval(actualizarPendentes,1000);
- gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}).then(()=>{
-  p.fim=Date.now();actualizarPendentes();
-  showToast("Alteração gravada: "+quem+" em "+segs(p.fim-p.inicio)+" s. Fórmulas recalculadas no Excel.");
-  meses.delete(ano+"-"+mes);mesesCompletos=false;
-  carregarLancamentos({ano,mes}).catch(()=>{}).finally(()=>{if(pendentes.get(k)===p){pendentes.delete(k);renderSalarios()}});
- }).catch(e=>{
-  p.erro=e.message||String(e);actualizarPendentes();renderSalarios();
-  showToast("Não gravado ("+quem+", "+segs(Date.now()-p.inicio)+" s): "+p.erro);
+ filaGravacao=filaGravacao.then(async()=>{
+  p.emFila=false;actualizarPendentes();
+  try{
+   await gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()});
+   p.fim=Date.now();actualizarPendentes();
+   showToast("Alteração gravada: "+quem+" em "+segs(p.fim-p.inicio)+" s. Fórmulas recalculadas no Excel.");
+   relerMesSeLivre(ano,mes);
+  }catch(e){
+   p.erro=e.message||String(e);actualizarPendentes();renderSalarios();
+   showToast("Não gravado ("+quem+", "+segs(Date.now()-p.inicio)+" s): "+p.erro);
+   relerMesSeLivre(ano,mes);
+  }
  });
 }
 document.querySelectorAll("[data-action]").forEach(el=>el.addEventListener("click",()=>showToast("Gravação ainda não activada neste módulo. Já disponível: criar e editar colaboradores.")));
