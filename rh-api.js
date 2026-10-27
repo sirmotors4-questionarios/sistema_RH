@@ -129,7 +129,9 @@ export async function gravarLancamento({ano, mes, mesNome, linha} = {}, deps = {
   if (!linha || !linha.Empresa || !linha.Codigo) throw new ApiError('Lançamento sem Empresa/Código.', 0, 'RH_ACTION');
   const body = await callApi('lancamento_editar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas: [linha]}});
   // O script devolve a linha recalculada (body.linha); sem ela o site relê o mês.
-  const linhaExcel = body.linha && typeof body.linha === 'object' && !Array.isArray(body.linha) ? body.linha : null;
+  let linhaExcel = body.linha;
+  if (typeof linhaExcel === 'string') { try { linhaExcel = JSON.parse(linhaExcel); } catch { linhaExcel = null; } }
+  if (!linhaExcel || typeof linhaExcel !== 'object' || Array.isArray(linhaExcel)) linhaExcel = null;
   return {alteradas: Number(body.alteradas) || 1, linha: linhaExcel};
 }
 
