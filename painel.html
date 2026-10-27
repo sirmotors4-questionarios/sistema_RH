@@ -44,7 +44,8 @@ async function receber(dados) {
       const {mount} = await import("https://cdn.jsdelivr.net/npm/@stlite/browser@1.10.0/build/stlite.js");
       app = mount({
         entrypoint: "app.py",
-        requirements: ["plotly"],
+        // Plotly alojado no próprio site: não depende do PyPI (muitas vezes bloqueado por antivírus/proxies).
+        requirements: [new URL("dashboard/wheels/plotly-6.9.0-py3-none-any.whl", location.href).href],
         files: {"app.py": codigo, ...ficheiros},
         streamlitConfig: {
           "client.toolbarMode": "viewer",
@@ -56,6 +57,7 @@ async function receber(dados) {
         }
       }, document.getElementById("root"));
       estado.hidden = true;
+      vigiar();
     } else {
       for (const [caminho, conteudo] of Object.entries(ficheiros)) await app.writeFile(caminho, conteudo);
       // Reescrever o app.py faz o Streamlit correr de novo com os dados novos (server.runOnSave).
@@ -66,6 +68,42 @@ async function receber(dados) {
     mostrar("Não foi possível abrir o dashboard: " + (e && e.message ? e.message : e), true);
     parent.postMessage({tipo: "rh-dashboard-erro", erro: String(e && e.message || e)}, location.origin);
   }
+}
+
+// Vigilante: se o Streamlit não aparecer em 90 s, testa os servidores necessários e explica o que falhou,
+// em vez de deixar as mensagens do stlite a rodar sem fim.
+const LIMITE_S = 90;
+function abriu() { return Boolean(document.querySelector('[data-testid="stSidebar"], [data-testid="stMain"], [data-testid="stAppViewContainer"] h1')); }
+async function testar(url) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), 15000);
+  try { await fetch(url, {mode: "no-cors", cache: "no-store", signal: c.signal}); return true; } catch { return false; } finally { clearTimeout(t); }
+}
+function vigiar() {
+  const t0 = Date.now();
+  const timer = setInterval(async () => {
+    if (abriu()) { clearInterval(timer); return; }
+    if (Date.now() - t0 < LIMITE_S * 1000) return;
+    clearInterval(timer);
+    const [cdn, site] = await Promise.all([
+      testar("https://cdn.jsdelivr.net/npm/@stlite/browser@1.10.0/package.json"),
+      testar(new URL("dashboard/app.py", location.href).href)]);
+    if (abriu()) return;
+    const causa = !cdn
+      ? "O navegador não consegue chegar a cdn.jsdelivr.net (onde está o Python). Peça à informática para permitir esse endereço ou experimente outro navegador."
+      : !site ? "Perdeu-se a ligação ao site do Sistema RH." 
+      : "Os servidores respondem, mas a preparação do Python não terminou (ligação lenta ou memória insuficiente). Feche outros separadores e tente de novo.";
+    document.getElementById("root").hidden = true;
+    estado.hidden = false; estado.classList.add("erro");
+    estado.querySelector(".barra")?.remove();
+    texto.textContent = `O dashboard não abriu em ${LIMITE_S} s. ${causa}`;
+    if (!document.getElementById("tentar")) {
+      const b = document.createElement("button");
+      b.id = "tentar"; b.textContent = "Tentar de novo";
+      b.style.cssText = "margin-top:6px;background:#be2537;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer";
+      b.onclick = () => parent.postMessage({tipo: "rh-dashboard-reiniciar"}, location.origin);
+      estado.append(b);
+    }
+  }, 2000);
 }
 
 window.addEventListener("message", ev => {
