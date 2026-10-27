@@ -128,7 +128,9 @@ export async function gravarNovoMes({ano, mes, mesNome, linhas} = {}, deps = {})
 export async function gravarLancamento({ano, mes, mesNome, linha} = {}, deps = {}) {
   if (!linha || !linha.Empresa || !linha.Codigo) throw new ApiError('Lançamento sem Empresa/Código.', 0, 'RH_ACTION');
   const body = await callApi('lancamento_editar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas: [linha]}});
-  return {alteradas: Number(body.alteradas) || 1};
+  // O script devolve a linha recalculada (body.linha); sem ela o site relê o mês.
+  const linhaExcel = body.linha && typeof body.linha === 'object' && !Array.isArray(body.linha) ? body.linha : null;
+  return {alteradas: Number(body.alteradas) || 1, linha: linhaExcel};
 }
 
 // Finalizar mês (modo "finalizar"): todos os lançamentos do mês passam a Finalizado / Revisto = Sim.

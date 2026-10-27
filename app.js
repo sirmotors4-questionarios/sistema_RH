@@ -71,16 +71,30 @@ function gravarEmFundo({ano,mes,chave,pedido}){
  filaGravacao=filaGravacao.then(async()=>{
   p.emFila=false;actualizarPendentes();
   try{
-   await gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()});
-   p.fim=Date.now();actualizarPendentes();
+   const res=await gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()});
+   p.fim=Date.now();
    showToast("Alteração gravada: "+quem+" em "+segs(p.fim-p.inicio)+" s. Fórmulas recalculadas no Excel.");
-   relerMesSeLivre(ano,mes);
+   if(actualizarLinha(ano,mes,chave,res.linha)){pendentes.delete(k);renderSalarios();actualizarPendentes()}
+   else{actualizarPendentes();p.reler=true;relerMesSeLivre(ano,mes)}
   }catch(e){
    p.erro=e.message||String(e);actualizarPendentes();renderSalarios();
    showToast("Não gravado ("+quem+", "+segs(Date.now()-p.inicio)+" s): "+p.erro);
-   relerMesSeLivre(ano,mes);
+   if([...pendentes.values()].some(x=>x.reler))relerMesSeLivre(ano,mes);
   }
  });
+}
+// Substitui na cache só a linha gravada, com os valores recalculados que o Office Script devolve.
+// As outras linhas (e as que ainda estão a gravar) ficam como estão. Devolve false se não houver linha.
+function actualizarLinha(ano,mes,chave,linhaExcel){
+ if(!linhaExcel)return false;
+ const igual=l=>M.numero(M.campo(l,"Ano"))===ano&&M.mes(M.campo(l,"Mês","Mes"))===mes&&M.chaveRH(M.campo(l,"Empresa"),M.campo(l,"Codigo"))===chave;
+ const listas=[dados.lancamentos?.tabelas?.["tbl_lançamento"],meses.get(ano+"-"+mes)].filter(Array.isArray);
+ let feito=false;
+ for(const lista of listas)for(const l of lista)if(igual(l)){
+  for(const[h,v]of Object.entries(linhaExcel))l[h]=v==null?"":(typeof v==="number"?String(v):v);
+  feito=true;
+ }
+ return feito;
 }
 document.querySelectorAll("[data-action]").forEach(el=>el.addEventListener("click",()=>showToast("Gravação ainda não activada neste módulo. Já disponível: criar e editar colaboradores.")));
 

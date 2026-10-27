@@ -20,6 +20,7 @@ interface Resultado {
   colunasFormula: string[];
   ms: number;
   filtrosLimpos?: boolean;
+  linha?: Record<string, string | number | boolean>;
 }
 const TABELA = "tbl_lançamento";
 const LIMITE_LINHAS = 2000;
@@ -136,6 +137,10 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
       definir(i, p, v);
     }
     definir(i, "Estado do Lançamento", "Alterado");
+    // Devolve a linha já recalculada (Vencimento, INSS, IRPS, Líquido…) para o site actualizar só esta linha.
+    const valores = corpo.getRow(i).getValues()[0];
+    r.linha = {};
+    cab.forEach((h, j) => { r.linha[h] = valores[j]; });
     r.alteradas = 1;
     r.ok = true;
     return fim();
