@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard RH</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@1.10.0/build/stlite.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; font-family: Inter, "Segoe UI", Arial, sans-serif; color: #182330; }
+  #estado { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; color: #738092; font-size: 13px; text-align: center; padding: 20px; box-sizing: border-box; }
+  #estado b { color: #182330; font-size: 15px; }
+  #estado .barra { width: 220px; height: 4px; background: #f7d9dc; border-radius: 4px; overflow: hidden; }
+  #estado .barra i { display: block; height: 100%; width: 35%; background: #be2537; animation: corre 1.2s infinite ease-in-out; }
+  @keyframes corre { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+  #estado.erro b { color: #a5283b; }
+</style>
+</head>
+<body>
+<div id="estado"><b>Dashboard RH</b><span id="estado-texto">A aguardar os dados do Sistema RH…</span><div class="barra"><i></i></div></div>
+<div id="root"></div>
+<script type="module">
+// Corre o dashboard Streamlit (dashboard/app.py) no navegador com stlite.
+// Os dados chegam da página do Sistema RH (mesma origem) por postMessage; nada sai do navegador.
+const estado = document.getElementById("estado"), texto = document.getElementById("estado-texto");
+const mostrar = (msg, erro = false) => { estado.hidden = false; estado.classList.toggle("erro", erro); texto.textContent = msg; };
+let app = null, codigo = null, versao = 0;
+
+function ficheirosDados(dados) {
+  versao += 1;
+  return {
+    "dados/funcionarios.json": JSON.stringify(dados.funcionarios || []),
+    "dados/lancamentos.json": JSON.stringify(dados.lancamentos || []),
+    "dados/meta.json": JSON.stringify(dados.meta || {}),
+    "dados/versao.txt": String(versao) + "-" + Date.now()
+  };
+}
+
+async function receber(dados) {
+  try {
+    if (!codigo) codigo = await (await fetch("dashboard/app.py", {cache: "no-cache"})).text();
+    const ficheiros = ficheirosDados(dados);
+    if (!app) {
+      mostrar("A preparar o Python no navegador… (a primeira abertura demora cerca de 20–40 s)");
+      const {mount} = await import("https://cdn.jsdelivr.net/npm/@stlite/browser@1.10.0/build/stlite.js");
+      app = mount({
+        entrypoint: "app.py",
+        requirements: ["plotly"],
+        files: {"app.py": codigo, ...ficheiros},
+        streamlitConfig: {
+          "client.toolbarMode": "viewer",
+          "server.runOnSave": true,
+          "theme.base": "light",
+          "theme.primaryColor": "#be2537",
+          "theme.textColor": "#182330",
+          "theme.secondaryBackgroundColor": "#f5f7fa"
+        }
+      }, document.getElementById("root"));
+      estado.hidden = true;
+    } else {
+      for (const [caminho, conteudo] of Object.entries(ficheiros)) await app.writeFile(caminho, conteudo);
+      // Reescrever o app.py faz o Streamlit correr de novo com os dados novos (server.runOnSave).
+      await app.writeFile("app.py", codigo + "\n# dados " + versao + "\n");
+    }
+    parent.postMessage({tipo: "rh-dashboard-pronto", versao}, location.origin);
+  } catch (e) {
+    mostrar("Não foi possível abrir o dashboard: " + (e && e.message ? e.message : e), true);
+    parent.postMessage({tipo: "rh-dashboard-erro", erro: String(e && e.message || e)}, location.origin);
+  }
+}
+
+window.addEventListener("message", ev => {
+  if (ev.origin !== location.origin || ev.source !== parent) return; // só a página do sistema
+  if (ev.data && ev.data.tipo === "rh-dashboard-dados") receber(ev.data.dados || {});
+});
+parent.postMessage({tipo: "rh-dashboard-ola"}, location.origin);
+</script>
+</body>
+</html>
