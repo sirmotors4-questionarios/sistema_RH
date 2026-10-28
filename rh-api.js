@@ -144,7 +144,7 @@ export async function finalizarMes({ano, mes, mesNome, utilizador = '', agoraSer
 }
 
 // ---------- Indemnizações (fluxo RH_API_Indemnizacoes → Office Script RHIndemnizacoes) ----------
-// O script devolve sempre texto JSON; o fluxo responde {ok, resultado: "<json>"} ou já com o objecto.
+// O fluxo responde com o objecto do script ({ok, …}); aceita também {resultado: <objecto ou texto JSON>}.
 function resultadoScript(body) {
   let r = body?.resultado ?? body;
   if (typeof r === 'string') { try { r = JSON.parse(r); } catch { throw new ApiError('Resposta do script inválida.', 200, 'RH_RESPONSE'); } }
@@ -154,7 +154,7 @@ function resultadoScript(body) {
 const listaJson = v => { if (Array.isArray(v)) return v; try { const x = JSON.parse(v || '[]'); return Array.isArray(x) ? x : []; } catch { return []; } };
 export async function indemnizacoesListar(deps = {}) {
   const r = resultadoScript(await callApi('indemnizacoes_listar', deps));
-  return {indemnizacoes: listaJson(r.indemnizacoes), prestacoes: listaJson(r.prestacoes)};
+  return {indemnizacoes: listaJson(r.listaIndemnizacoes ?? r.indemnizacoes), prestacoes: listaJson(r.listaPrestacoes ?? r.prestacoes)};
 }
 export async function indemnizacaoGravar(pedido, deps = {}) {
   return resultadoScript(await callApi('indemnizacao_gravar', {...deps, params: {dados: JSON.stringify(pedido)}}));

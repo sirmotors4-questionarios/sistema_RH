@@ -7,7 +7,7 @@
  * accao "gravar"   — acrescenta uma indemnização e o seu plano de prestações (tudo validado antes de escrever).
  * accao "pagar"    — marca/desmarca uma prestação como paga (dados: {id, paga, data}).
  * accao "anular"   — marca uma indemnização como Anulada (não apaga linhas).
- * Nunca apaga linhas nem toca noutras tabelas. Devolve sempre texto JSON.
+ * Nunca apaga linhas nem toca noutras tabelas. Devolve um objecto simples (sem índices genéricos).
  */
 const FOLHA = "Indemnizacoes";
 const T_IND = "tbl_indemnizacoes";
@@ -25,6 +25,11 @@ const LIMITE_PRESTACOES = 120;
 
 type Celula = string | number | boolean;
 interface Prestacao { numero: number; dataLimite: string; valor: number; }
+interface Resultado {
+  ok: boolean; accao: string; erro?: string; erros?: string[]; criadas?: string[];
+  id?: string; anos?: number; total?: number; prestacoes?: number; paga?: boolean;
+  listaIndemnizacoes?: string; listaPrestacoes?: string; // JSON das tabelas (accao "listar")
+}
 interface Pedido {
   empresa?: string; codigo?: string; nome?: string; departamento?: string;
   dataAdmissao?: string; dataReferencia?: string; vencimentoBase?: number;
@@ -33,15 +38,15 @@ interface Pedido {
   id?: string; paga?: boolean; data?: string;
 }
 
-function main(workbook: ExcelScript.Workbook, accao: string, dados: string, utilizador: string): string {
+function main(workbook: ExcelScript.Workbook, accao: string, dados: string, utilizador: string): Resultado {
   try {
     const a = String(accao || "").trim().toLowerCase();
     let p: Pedido = {};
     if (dados && String(dados).trim()) p = JSON.parse(dados) as Pedido;
-    if (a === "preparar") return JSON.stringify(preparar(workbook));
+    if (a === "preparar") return preparar(workbook);
     const ind = workbook.getTable(T_IND), pre = workbook.getTable(T_PRE);
     if (!ind || !pre) return erro("As tabelas das indemnizações ainda não existem. Corra a acção «preparar».");
-    if (a === "listar") return JSON.stringify({ok: true, accao: a, indemnizacoes: ler(ind), prestacoes: ler(pre)});
+    if (a === "listar") return {ok: true, accao: a, listaIndemnizacoes: ler(ind), listaPrestacoes: ler(pre)};
     if (a === "gravar") return gravar(ind, pre, p, utilizador);
     if (a === "pagar") return pagar(pre, p, utilizador);
     if (a === "anular") return anular(ind, p, utilizador);
@@ -51,9 +56,9 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
   }
 }
 
-function erro(m: string): string { return JSON.stringify({ok: false, erro: m}); }
+function erro(m: string): Resultado { return {ok: false, accao: "erro", erro: m, erros: [m]}; }
 
-function preparar(workbook: ExcelScript.Workbook): {ok: boolean, accao: string, criadas: string[]} {
+function preparar(workbook: ExcelScript.Workbook): Resultado {
   const criadas: string[] = [];
   let folha = workbook.getWorksheet(FOLHA);
   if (!folha) { folha = workbook.addWorksheet(FOLHA); }
@@ -144,7 +149,7 @@ function linhaPorCabecalho(t: ExcelScript.Table, o: { [k: string]: Celula }): Ce
   return cab.map(h => (h in o ? o[h] : ""));
 }
 
-function gravar(ind: ExcelScript.Table, pre: ExcelScript.Table, p: Pedido, utilizador: string): string {
+function gravar(ind: ExcelScript.Table, pre: ExcelScript.Table, p: Pedido, utilizador: string): Resultado {
   const erros: string[] = [];
   const empresa = String(p.empresa || "").trim(), codigo = normCodigo(p.codigo);
   if (!empresa || !codigo) erros.push("Falta a Empresa ou o Código do colaborador.");
@@ -177,7 +182,7 @@ function gravar(ind: ExcelScript.Table, pre: ExcelScript.Table, p: Pedido, utili
   const existentes = dadosTabela(ind).filter(v => !vazia(v));
   if (existentes.some(v => String(v[iE]).trim().toUpperCase() === empresa.toUpperCase() && normCodigo(v[iC]) === codigo && String(v[iS]) !== "Anulada"))
     erros.push("Já existe uma indemnização activa para " + empresa + " / " + codigo + ". Anule-a antes de criar outra.");
-  if (erros.length) return JSON.stringify({ok: false, erro: erros.join(" "), erros});
+  if (erros.length) return {ok: false, accao: "gravar", erro: erros.join(" "), erros};
 
   let maior = 0;
   existentes.forEach(v => { const m = /^IND-(\d+)$/.exec(String(v[iId])); if (m) maior = Math.max(maior, Number(m[1])); });
@@ -199,7 +204,7 @@ function gravar(ind: ExcelScript.Table, pre: ExcelScript.Table, p: Pedido, utili
   limparFiltro(ind); limparFiltro(pre);
   inserir(ind, [linhaPorCabecalho(ind, linhaInd)]);
   inserir(pre, linhasPre);
-  return JSON.stringify({ok: true, accao: "gravar", id, anos, total, prestacoes: linhasPre.length});
+  return {ok: true, accao: "gravar", id, anos, total, prestacoes: linhasPre.length};
 }
 
 function limparFiltro(t: ExcelScript.Table) {
@@ -207,7 +212,7 @@ function limparFiltro(t: ExcelScript.Table) {
   if (f && f.getIsDataFiltered()) f.clearCriteria();
 }
 
-function pagar(pre: ExcelScript.Table, p: Pedido, utilizador: string): string {
+function pagar(pre: ExcelScript.Table, p: Pedido, utilizador: string): Resultado {
   const id = String(p.id || "").trim();
   if (!id) return erro("Falta o identificador da prestação.");
   const cab = pre.getHeaderRowRange().getValues()[0].map(h => String(h));
@@ -224,10 +229,10 @@ function pagar(pre: ExcelScript.Table, p: Pedido, utilizador: string): string {
   set("Estado", paga ? "Paga" : "Pendente");
   set("Data Pagamento", paga ? sData : "");
   set("Pago Por", paga ? String(utilizador || "") : "");
-  return JSON.stringify({ok: true, accao: "pagar", id, paga});
+  return {ok: true, accao: "pagar", id, paga};
 }
 
-function anular(ind: ExcelScript.Table, p: Pedido, utilizador: string): string {
+function anular(ind: ExcelScript.Table, p: Pedido, utilizador: string): Resultado {
   const id = String(p.id || "").trim();
   const cab = ind.getHeaderRowRange().getValues()[0].map(h => String(h));
   if (!id || !ind.getRowCount()) return erro("Indemnização não encontrada.");
@@ -240,5 +245,5 @@ function anular(ind: ExcelScript.Table, p: Pedido, utilizador: string): string {
   set("Utilizador Alteracao", String(utilizador || ""));
   set("Data Ultima Alteracao", hojeSerie());
   if (p.observacoes) set("Observacoes", String(p.observacoes));
-  return JSON.stringify({ok: true, accao: "anular", id});
+  return {ok: true, accao: "anular", id};
 }
