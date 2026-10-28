@@ -1,13 +1,16 @@
 import {evaluateFormula} from "./rh-engine.js";
 import {readTables, resolveTables, simulateRecord} from "./rh-data.js";
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
-import {loadConfiguracoes} from "./rh-api.js";
+import {loadConfiguracoes, loadModulo} from "./rh-api.js";
+import {contarTiposContrato} from "./tipos-contrato.js";
 import {sessaoAcesso, urlGuardada, sairAcesso} from "./rh-acesso.js";
 "use strict";
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const nav=$$(".config-nav");
 function section(name){nav.forEach(b=>b.classList.toggle("active",b.dataset.section===name));$$(".section-view").forEach(v=>v.classList.toggle("active",v.dataset.view===name));}
 nav.forEach(b=>b.addEventListener("click",()=>section(b.dataset.section)));
+// Ligação directa a uma secção (ex.: configuracoes.html#contratos, a partir de Colaboradores).
+if(location.hash&&nav.some(b=>b.dataset.section===location.hash.slice(1)))section(location.hash.slice(1));
 $("#menu-toggle").addEventListener("click",()=>$("#sidebar").classList.toggle("open"));
 function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.classList.remove("show"),4500)}
 const level=$("#scope-level");
@@ -119,6 +122,7 @@ async function loadRemote(){
   $("#integration-badge").textContent="Motor ligado · Power Automate";
   $("#propose").disabled=!utilizador.propor;
   authView("ok",(utilizador.nome||utilizador.email)+" · Perfil: "+utilizador.perfil+(utilizador.propor?"":" (apenas consulta)")+". Configurações carregadas.");
+  carregarTiposContrato();
  }catch(error){
   utilizador=null;authView("error",error.message);
  }finally{button.disabled=false;}
@@ -137,3 +141,43 @@ $("#load-remote").addEventListener("click",loadRemote);
   else authView("","Inicie sessão com a conta Microsoft da SIR para carregar as configurações reais.");
  }catch(error){authView("error",error.message);}
 })();
+
+// ---------- Tipos de contrato ----------
+// Contagem a partir do cadastro (tbl_funcionarios.TipoContrato). «+ Novo contrato» acrescenta um tipo proposto,
+// mantido só nesta sessão até existir gravação de configurações no Excel.
+let funcionarios=null;const propostos=[];
+async function carregarTiposContrato(){
+ const body=$("#tc-body");body.replaceChildren();rowCells(body,["A ler o cadastro de colaboradores…"]);body.firstChild.firstChild.colSpan=7;
+ try{funcionarios=(await loadModulo("funcionarios",deps())).tabelas.tbl_funcionarios;}
+ catch(e){funcionarios=null;body.replaceChildren();rowCells(body,["Não foi possível ler o cadastro: "+e.message]);body.firstChild.firstChild.colSpan=7;return}
+ renderTiposContrato();
+}
+function renderTiposContrato(){
+ const body=$("#tc-body");body.replaceChildren();
+ const r=contarTiposContrato(funcionarios||[],propostos);
+ $("#tc-n-tipos").textContent=funcionarios?String(r.tipos.length):(propostos.length?String(propostos.length):"—");
+ $("#tc-n-activos").textContent=funcionarios?String(r.activos):"—";
+ $("#tc-n-sem").textContent=funcionarios?String(r.semTipo):"—";
+ if(!r.tipos.length){rowCells(body,["Sem tipos de contrato no cadastro."]);body.firstChild.firstChild.colSpan=7;return}
+ r.tipos.forEach(t=>{const tr=document.createElement("tr");
+  [t.nome,t.duracao||"—",t.regime||"—",t.activos,t.inactivos,t.total].forEach((v,i)=>{const td=document.createElement("td");if(i>=3)td.className="num";td.textContent=String(v);if(i===0)td.style.fontWeight="700";tr.append(td)});
+  const td=document.createElement("td"),tag=document.createElement("span");tag.className="tc-tag"+(t.proposto?" proposto":"");tag.textContent=t.proposto?"Proposto · por gravar":"Cadastro";td.append(tag);tr.append(td);body.append(tr)});
+}
+const tcForm=$("#tc-form");
+$("#novo-contrato").addEventListener("click",()=>{
+ if(utilizador&&!utilizador.propor){toast("O seu perfil ("+utilizador.perfil+") permite consultar, mas não propor tipos de contrato.");return}
+ tcForm.hidden=false;$("#tc-erro").textContent="";$("#tc-nome").focus();
+});
+$("#tc-cancelar").addEventListener("click",()=>{tcForm.reset();tcForm.hidden=true});
+tcForm.addEventListener("submit",ev=>{
+ ev.preventDefault();
+ const nome=$("#tc-nome").value.trim().replace(/\s+/g," ");
+ const existe=n=>contarTiposContrato(funcionarios||[],propostos).tipos.some(t=>t.nome.localeCompare(n,"pt",{sensitivity:"base"})===0);
+ if(!nome){$("#tc-erro").textContent="Indique a designação do tipo de contrato.";return}
+ if(existe(nome)){$("#tc-erro").textContent="Já existe um tipo de contrato «"+nome+"».";return}
+ const dias=$("#tc-experimental").value;
+ if(dias!==""&&!(Number.isInteger(Number(dias))&&Number(dias)>=0&&Number(dias)<=180)){$("#tc-erro").textContent="O período experimental deve ser um número inteiro de 0 a 180 dias.";return}
+ propostos.push({nome,duracao:$("#tc-duracao").value,regime:$("#tc-regime").value,experimental:dias});
+ tcForm.reset();tcForm.hidden=true;renderTiposContrato();
+ toast("Tipo «"+nome+"» adicionado à lista como proposto. Ainda não foi gravado no Excel.");
+});
