@@ -43,18 +43,18 @@ export const COLUNAS_FOLHA = [
   ["totalRem", "Total Rem."], ["irps", "IRPS"], ["inss", "INSS"], ["outrosDesc", "Outros desc"], ["totalDesc", "Total Desc."], ["liquido", "Líq. MT"]
 ];
 const tituloFolha = (ano, mes) => "Folha de Salarios do mês de " + NOME_MES[mes - 1] + " de " + ano;
-const filtroTexto = ({empresa, departamento}) => departamento && departamento !== "TODOS" ? "Departamento: " + departamento : "";
+const filtroTexto = ({empresa, departamento}, extra = "") => [departamento && departamento !== "TODOS" ? "Departamento: " + departamento : "", extra].filter(Boolean).join("   |   ");
 const empresaTitulo = ({empresa}) => empresa && empresa !== "TODOS" ? empresa : "FOLHA SALARIAL";
 export const nomeFicheiroFolha = (ano, mes, filtros, ext) =>
   nomeSeguro("Folha_Salarios_" + NOME_MES[mes - 1] + "_" + ano + (filtros.empresa && filtros.empresa !== "TODOS" ? "_" + filtros.empresa : "")) + "." + ext;
 
-export async function folhaPDF(linhas, {ano, mes, filtros = {}, utilizador = ""}) {
+export async function folhaPDF(linhas, {ano, mes, filtros = {}, utilizador = "", subtitulo = ""}) {
   const JsPDF = await pdf();
   const doc = new JsPDF({orientation: "landscape", unit: "mm", format: "a4"});
   const W = doc.internal.pageSize.getWidth();
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(empresaTitulo(filtros), 5, 10);
   doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text(tituloFolha(ano, mes), 5, 18);
-  doc.setFontSize(9); doc.text(filtroTexto(filtros), 5, 24);
+  doc.setFontSize(9); doc.text(filtroTexto(filtros, subtitulo), 5, 24);
   const num = k => !["codigo", "nome", "profissao"].includes(k);
   const corpo = linhas.map(l => COLUNAS_FOLHA.map(([k]) => k === "diasFalta" ? (l[k] ? String(l[k]).replace(".", ",") : "") : num(k) ? fmt(l[k]) : l[k]));
   const totais = COLUNAS_FOLHA.map(([k], i) => i === 0 ? "Totais:" : num(k) && k !== "diasFalta" ? fmt(somar(linhas, k)) : "");
@@ -85,7 +85,7 @@ export async function folhaPDF(linhas, {ano, mes, filtros = {}, utilizador = ""}
   return doc.output("blob");
 }
 
-export async function folhaExcel(linhas, {ano, mes, filtros = {}, utilizador = ""}) {
+export async function folhaExcel(linhas, {ano, mes, filtros = {}, utilizador = "", subtitulo = ""}) {
   const ExcelJS = await excel();
   const wb = new ExcelJS.Workbook(); wb.creator = "Sistema RH SIR";
   const ws = wb.addWorksheet("Folha " + NOME_MES[mes - 1].slice(0, 3) + " " + ano, {
@@ -98,7 +98,7 @@ export async function folhaExcel(linhas, {ano, mes, filtros = {}, utilizador = "
   const fonte = (c, extra = {}) => { c.font = {name: "Arial", size: 8, ...extra}; };
   ws.mergeCells("A1:O1"); ws.getCell("A1").value = empresaTitulo(filtros); fonte(ws.getCell("A1"), {size: 9});
   ws.mergeCells("A2:O2"); ws.getCell("A2").value = tituloFolha(ano, mes); fonte(ws.getCell("A2"), {size: 15, bold: true});
-  ws.mergeCells("A3:O3"); ws.getCell("A3").value = filtroTexto(filtros); fonte(ws.getCell("A3"), {size: 9, bold: true});
+  ws.mergeCells("A3:O3"); ws.getCell("A3").value = filtroTexto(filtros, subtitulo); fonte(ws.getCell("A3"), {size: 9, bold: true});
   [1, 2, 3].forEach(r => { ws.getRow(r).height = 18; });
   ws.mergeCells("A5:J5"); ws.getCell("A5").value = "Remunerações";
   ws.mergeCells("K5:N5"); ws.getCell("K5").value = "Descontos";
@@ -135,6 +135,95 @@ export async function folhaExcel(linhas, {ano, mes, filtros = {}, utilizador = "
   ws.mergeCells(rod + 2, 11, rod + 2, 14); ws.getCell(rod + 2, 11).value = "(Aprovado por)";
   [6, 11].forEach(c => { const x = ws.getCell(rod + 2, c); fonte(x); x.alignment = {horizontal: "center"}; for (let k = c; k < c + 4; k++) ws.getCell(rod + 1, k).border = {bottom: {style: "thin"}}; });
   ws.pageSetup.printArea = "A1:O" + (rod + 6);
+  return new Blob([await wb.xlsx.writeBuffer()], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+
+// ---------- folha com as colunas escolhidas na tabela ----------
+// t = {colunas: [{rotulo, num, total, inteiro}], valores: [[número|texto]], totais: [número|null]}
+export const colunaRotuloTotais = totais => { const i = totais.findIndex(t => t == null); return i < 0 ? -1 : i; };
+const valorFolha = (c, v) => v == null || v === "" ? "" : c.num ? (c.inteiro ? fmt(v).replace(/,00$/, "") : fmt(v)) : String(v);
+
+export async function folhaPersonalizadaPDF(t, {ano, mes, filtros = {}, utilizador = "", subtitulo = ""}) {
+  const JsPDF = await pdf();
+  const largo = t.colunas.length > 8;
+  const doc = new JsPDF({orientation: largo ? "landscape" : "portrait", unit: "mm", format: "a4"});
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.text(empresaTitulo(filtros), 5, 10);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.text(tituloFolha(ano, mes), 5, 18);
+  doc.setFontSize(9); doc.text(filtroTexto(filtros, subtitulo), 5, 24);
+  const iRot = colunaRotuloTotais(t.totais);
+  const fonte = t.colunas.length > 16 ? 5.5 : t.colunas.length > 12 ? 6.5 : 7.5;
+  doc.autoTable({
+    startY: 28, margin: {left: 5, right: 5, top: 14, bottom: 12}, theme: "plain",
+    head: [t.colunas.map(c => c.rotulo)],
+    body: t.valores.map(r => r.map((v, i) => valorFolha(t.colunas[i], v))),
+    foot: [t.totais.map((v, i) => i === iRot ? "Totais:" : v == null ? "" : fmt(v))], showFoot: "lastPage",
+    styles: {font: "helvetica", fontSize: fonte, cellPadding: 1.2, overflow: "linebreak"},
+    headStyles: {fontStyle: "bold", valign: "bottom", lineWidth: {top: 0.4, bottom: 0.2}, lineColor: 40},
+    footStyles: {fontStyle: "bold", lineWidth: {top: 0.4}, lineColor: 40},
+    bodyStyles: {lineWidth: {bottom: 0.1}, lineColor: 210},
+    columnStyles: Object.fromEntries(t.colunas.map((c, i) => [i, c.num ? {halign: "right"} : {}])),
+    didParseCell: d => { if (d.section === "head" && t.colunas[d.column.index]?.num) d.cell.styles.halign = "right"; }
+  });
+  let y = doc.lastAutoTable.finalY + 8;
+  if (y > H - 35) { doc.addPage(); y = 20; }
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  doc.text("Impresso por: " + utilizador + "  " + agoraTexto(), 5, y);
+  const a = W * 0.35, b = W * 0.72;
+  doc.line(a - 32, y + 12, a + 32, y + 12); doc.text("(O Dep Rec. Humanos)", a, y + 16, {align: "center"});
+  doc.line(b - 32, y + 12, b + 32, y + 12); doc.text("(Aprovado por)", b, y + 16, {align: "center"});
+  const total = doc.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p); doc.setFontSize(7); doc.setFont("helvetica", "normal");
+    doc.text(hojeTexto() + " | Pág. " + p + "/" + total, W - 5, 6, {align: "right"});
+    doc.text("Gerado pelo Sistema de Gestão de Colaboradores", 5, H - 5);
+  }
+  return doc.output("blob");
+}
+
+export async function folhaPersonalizadaExcel(t, {ano, mes, filtros = {}, utilizador = "", subtitulo = ""}) {
+  const ExcelJS = await excel();
+  const wb = new ExcelJS.Workbook(); wb.creator = "Sistema RH SIR";
+  const n = Math.max(t.colunas.length, 1);
+  const ws = wb.addWorksheet("Folha " + NOME_MES[mes - 1].slice(0, 3) + " " + ano, {
+    pageSetup: {orientation: n > 8 ? "landscape" : "portrait", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+      margins: {left: 0.2, right: 0.2, top: 0.28, bottom: 0.28, header: 0.1, footer: 0.1}, printTitlesRow: "5:5"},
+    headerFooter: {oddHeader: "&R" + hojeTexto() + " | Pág. &P/&N", oddFooter: "&LGerado pelo Sistema de Gestão de Colaboradores"}
+  });
+  const fonte = (c, extra = {}) => { c.font = {name: "Arial", size: 8, ...extra}; };
+  t.colunas.forEach((c, i) => {
+    const maior = Math.max(c.rotulo.length, ...t.valores.slice(0, 300).map(r => valorFolha(c, r[i]).length));
+    ws.getColumn(i + 1).width = Math.min(40, Math.max(8, maior + 2));
+  });
+  [[1, empresaTitulo(filtros), {size: 9}], [2, tituloFolha(ano, mes), {size: 15, bold: true}], [3, filtroTexto(filtros, subtitulo), {size: 9, bold: true}]].forEach(([r, v, f]) => {
+    ws.mergeCells(r, 1, r, n); ws.getCell(r, 1).value = v; fonte(ws.getCell(r, 1), f); ws.getRow(r).height = 18;
+  });
+  const cab = ws.getRow(5); cab.height = 24;
+  t.colunas.forEach((c, i) => {
+    const x = cab.getCell(i + 1); x.value = c.rotulo; fonte(x, {bold: true});
+    x.alignment = {wrapText: true, vertical: "bottom", horizontal: c.num ? "right" : "left"};
+    x.border = {top: {style: "medium"}, bottom: {style: "thin"}};
+  });
+  const primeira = 6;
+  t.valores.forEach((r, k) => {
+    const row = ws.getRow(primeira + k);
+    t.colunas.forEach((c, i) => {
+      const x = row.getCell(i + 1), v = r[i];
+      x.value = v === "" || v == null ? null : v; fonte(x);
+      if (c.num) x.numFmt = c.inteiro ? "0.##" : "#,##0.00";
+      x.border = {bottom: {style: "thin", color: {argb: "FFD2D2D2"}}};
+    });
+  });
+  const ultima = primeira + t.valores.length - 1, rt = ws.getRow(ultima + 1), iRot = colunaRotuloTotais(t.totais);
+  t.colunas.forEach((c, i) => {
+    const x = rt.getCell(i + 1);
+    if (t.totais[i] != null) { const L = ws.getColumn(i + 1).letter; x.value = {formula: "SUM(" + L + primeira + ":" + L + ultima + ")", result: t.totais[i]}; x.numFmt = "#,##0.00"; }
+    else if (i === iRot) x.value = "Totais:";
+    fonte(x, {bold: true}); x.border = {top: {style: "medium"}};
+  });
+  const rod = ultima + 3;
+  ws.getCell(rod, 1).value = "Impresso por: " + utilizador + "  " + agoraTexto(); fonte(ws.getCell(rod, 1));
+  ws.views = [{state: "frozen", ySplit: 5}];
   return new Blob([await wb.xlsx.writeBuffer()], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
 }
 

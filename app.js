@@ -504,6 +504,9 @@ const lanc=iniciarLancamentos({
  periodoMaisRecente:()=>dados.lancamentos?.periodo||null,
  lancamentosMes:()=>{const p=dados.lancamentos?.periodo;return p?doPeriodo(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes):[]},
  filtros:()=>({empresa:$("pay-company").value,departamento:$("pay-department").value,codigo:$("pay-employee").value}),
+ // A folha segue a tabela: mesma ordenação e, se a estrutura foi alterada, as mesmas colunas pela mesma ordem.
+ vistaTabela:()=>{const cat=LC.catalogo(linhas("lancamentos","tbl_lançamento")),porId=new Map(cat.map(c=>[c.id,c]));const p=LC.normalizar(colunasLanc,cat);
+  return {colunas:p.colunas.map(id=>porId.get(id)),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null})}},
  carregarMes,esquecerMes:(a,m)=>{meses.delete(a+"-"+m);mesesCompletos=false},
  funcionarios:()=>carregar("funcionarios").then(()=>linhas("funcionarios","tbl_funcionarios")),
  contratos:()=>carregar("contratos").then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),

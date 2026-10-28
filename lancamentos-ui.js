@@ -2,6 +2,7 @@
 import * as M from "./rh-modulos.js";
 import * as F from "./rh-folha.js";
 import * as X from "./rh-export.js";
+import * as LC from "./lancamentos-colunas.js";
 
 const $ = id => document.getElementById(id);
 const el = (tag, props = {}, ...filhos) => {
@@ -54,28 +55,49 @@ export function iniciarLancamentos(ctx) {
   const erro = e => { $("rel-body").replaceChildren(el("p", {class: "form-error", text: e.message || String(e)})); };
 
   // ---------- folha ----------
+  // Folha = lançamentos do mês com os filtros (Empresa, Departamento, Colaborador), pela ordenação escolhida na tabela.
+  // Estrutura padrão da tabela → layout oficial da folha (igual ao VBA). Estrutura alterada → as colunas escolhidas, pela mesma ordem.
   function dadosFolha() {
     const {ano, mes} = ctx.periodo();
-    const filtros = ctx.filtros();
-    const linhas = F.linhasFolha(ctx.lancamentosMes(), ano, mes, filtros);
-    if (!linhas.length) throw Error("Não existem lançamentos para os filtros seleccionados.");
-    return {ano, mes, filtros, linhas};
+    const filtros = ctx.filtros(), vista = ctx.vistaTabela();
+    let brutas = F.filtrarFolha(ctx.lancamentosMes(), ano, mes, filtros);
+    if (!brutas.length) throw Error("Não existem lançamentos para os filtros seleccionados.");
+    if (vista.ordem) brutas = LC.ordenar(M.lancamentos(brutas), vista.ordem.col, vista.ordem.dir).map(m => m.linha);
+    const ordemTexto = vista.ordem ? "Ordenado por " + vista.ordem.col.rotulo + " (" + (vista.ordem.dir === "asc" ? "crescente" : "decrescente") + ")" : "";
+    const d = {ano, mes, filtros, ordemTexto, linhas: F.linhasFolha(brutas, ano, mes)};
+    if (vista.personalizada) {
+      const modelos = M.lancamentos(brutas), cols = vista.colunas;
+      d.personalizada = {
+        colunas: cols.map(c => ({rotulo: c.rotulo, num: c.tipo === "numero", total: c.tipo === "numero" && Boolean(c.total), inteiro: Boolean(c.inteiro)})),
+        valores: modelos.map(m => cols.map(c => c.tipo === "numero" ? M.numero(c.valor(m)) : LC.formatar(c, m))),
+        totais: cols.map(c => c.tipo === "numero" && c.total ? LC.somar(modelos, c) : null)
+      };
+    }
+    return d;
   }
   const textoFiltro = f => "Empresa: " + (f.empresa || "TODOS") + "   |   Departamento: " + (f.departamento || "TODOS") + "   |   " + (f.codigo ? "Código: " + f.codigo : "Colaborador: TODOS");
   async function exportarFolha(tipo) {
     const d = dadosFolha(), opt = {ano: d.ano, mes: d.mes, filtros: d.filtros, utilizador: ctx.utilizador()};
-    const blob = tipo === "pdf" ? await X.folhaPDF(d.linhas, opt) : await X.folhaExcel(d.linhas, opt);
+    opt.subtitulo = d.ordemTexto;
+    const blob = d.personalizada
+      ? (tipo === "pdf" ? await X.folhaPersonalizadaPDF(d.personalizada, opt) : await X.folhaPersonalizadaExcel(d.personalizada, opt))
+      : (tipo === "pdf" ? await X.folhaPDF(d.linhas, opt) : await X.folhaExcel(d.linhas, opt));
     X.descarregar(blob, X.nomeFicheiroFolha(d.ano, d.mes, d.filtros, tipo));
     ctx.aviso("Folha exportada: " + X.nomeFicheiroFolha(d.ano, d.mes, d.filtros, tipo));
   }
   function preVisualizar() {
     let d;
     try { d = dadosFolha(); } catch (e) { ctx.aviso(e.message); return; }
-    abrir({eyebrow: "PRÉ-VISUALIZAÇÃO", titulo: "Folha de Salários - " + M.NOME_MES[d.mes - 1] + " de " + d.ano, sub: textoFiltro(d.filtros)});
+    abrir({eyebrow: "PRÉ-VISUALIZAÇÃO", titulo: "Folha de Salários - " + M.NOME_MES[d.mes - 1] + " de " + d.ano, sub: textoFiltro(d.filtros) + (d.ordemTexto ? "   |   " + d.ordemTexto : "")});
     const l = d.linhas, s = k => F.somar(l, k);
+    const fv = (c, v) => v == null || v === "" ? "" : c.num ? (c.inteiro ? fmt(v).replace(/,00$/, "") : fmt(v)) : v;
+    const P = d.personalizada;
     $("rel-body").replaceChildren(
+      ...(P ? [el("p", {class: "rel-nota", text: "Folha com as colunas escolhidas na tabela (" + P.colunas.length + "). Para o layout oficial, reponha a estrutura padrão da tabela."})] : []),
       el("div", {class: "stats compact-stats rel-stats"}, cartao("Colaboradores", String(l.length)), cartao("Vencimento base", fmt(s("base")), "MT"),
         cartao("Acréscimos", fmt(s("acrescimos")), "MT"), cartao("Descontos", fmt(s("totalDesc")), "MT"), cartao("Salário líquido", fmt(s("liquido")), "MT")),
+      P ? tabela(P.colunas.map(c => c.rotulo), P.valores.map(r => r.map((v, i) => fv(P.colunas[i], v))),
+        {num: P.colunas.map((c, i) => c.num ? i : -1).filter(i => i >= 0), rodape: P.totais.map((t, i) => i === X.colunaRotuloTotais(P.totais) ? "Totais" : t == null ? "" : fmt(t))}) :
       tabela(["Código", "Nome", "Profissão", "Venc. base", "Acréscimos", "IRPS", "INSS", "Outros desc.", "Total desc.", "Líquido"],
         l.map(x => [x.codigo, x.nome, x.profissao, fmt(x.base), fmt(x.acrescimos), fmt(x.irps), fmt(x.inss), fmt(x.outrosDesc), fmt(x.totalDesc), fmt(x.liquido)]),
         {num: [3, 4, 5, 6, 7, 8, 9], rodape: ["Totais", l.length + " colab.", "", fmt(s("base")), fmt(s("acrescimos")), fmt(s("irps")), fmt(s("inss")), fmt(s("outrosDesc")), fmt(s("totalDesc")), fmt(s("liquido"))]}));
