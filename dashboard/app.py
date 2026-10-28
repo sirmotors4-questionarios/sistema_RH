@@ -224,6 +224,39 @@ def carregar(versao):
     return meta, func, lanc
 
 
+@st.cache_data(show_spinner=False)
+def carregar_indemnizacoes(versao):
+    """Planos (tbl_indemnizacoes) e prestações (tbl_indemnizacoes_prestacoes). Planos anulados ficam de fora."""
+    def ler(nome):
+        f = DADOS / nome
+        return json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    ind = pd.DataFrame(ler("indemnizacoes.json"))
+    pre = pd.DataFrame(ler("prestacoes.json"))
+    if ind.empty:
+        return ind, pre
+    for c in ("ID_Indemnizacao", "Empresa", "Codigo", "Nome", "Departamento", "Estado", "Observacoes"):
+        ind[c] = ind[c].fillna("").astype(str).str.strip() if c in ind else ""
+    ind["Empresa"] = ind["Empresa"].replace("", "Não indicado")
+    ind["Departamento"] = ind["Departamento"].replace("", "Não indicado")
+    ind["admissao"] = ind.get("Data Admissao", pd.Series([None] * len(ind))).map(data)
+    ind["saida"] = ind.get("Data Referencia", pd.Series([None] * len(ind))).map(data)
+    for c in ("Anos de Trabalho", "Vencimento Base", "Valor Total", "Numero Prestacoes"):
+        ind[c] = ind[c].map(numero) if c in ind else 0.0
+    ind = ind[~ind["Estado"].str.lower().str.startswith("anulad")]
+    if pre.empty:
+        pre = pd.DataFrame(columns=["ID_Indemnizacao", "Valor", "limite", "pago_em", "paga"])
+    else:
+        pre["ID_Indemnizacao"] = pre.get("ID_Indemnizacao", "").fillna("").astype(str).str.strip()
+        pre = pre[pre["ID_Indemnizacao"].isin(set(ind["ID_Indemnizacao"]))].copy()
+        pre["Valor"] = pre.get("Valor", 0).map(numero)
+        pre["limite"] = pre.get("Data Limite", pd.Series([None] * len(pre))).map(data)
+        pre["pago_em"] = pre.get("Data Pagamento", pd.Series([None] * len(pre))).map(data)
+        pre["paga"] = pre.get("Estado", "").fillna("").astype(str).str.strip().str.lower().eq("paga")
+        pre = pre.join(ind.set_index("ID_Indemnizacao")[["Empresa", "Departamento", "Nome"]], on="ID_Indemnizacao", rsuffix="_ind")
+        pre["Nome"] = pre["Nome_ind"].fillna(pre.get("Nome", "")) if "Nome_ind" in pre else pre.get("Nome", "")
+    return ind, pre
+
+
 VALORES = ["Vencimento Base", "Vencimento", "Salario Liquido", "INSS Colaborador", "INSS Empresa", "Total INSS", "IRPS",
            "Total de Acréscimos", "Total de Descontos", "Subsídios", "Bónus", "Outros Acréscimos", "Horas Extras",
            "Faltas Justificadas", "Faltas Injustificadas", "Adiantamentos", "Empréstimos", "Outros Descontos", "Dias Trabalhados"]
@@ -238,7 +271,7 @@ if func.empty and lanc.empty:
 
 
 # ---------------------------------------------------------------- filtros (barra lateral)
-PAINEIS = ["Custo do Capital Humano", "Perfil dos Colaboradores", "Movimentação e Presença", "Remuneração e Equidade"]
+PAINEIS = ["Custo do Capital Humano", "Perfil dos Colaboradores", "Movimentação e Presença", "Remuneração e Equidade", "Indemnizações"]
 escolha = st.sidebar.selectbox("Escolha um Dashboard", PAINEIS)
 
 periodos = sorted(lanc[["ano", "mes"]].drop_duplicates().itertuples(index=False, name=None)) if not lanc.empty else []
@@ -681,7 +714,7 @@ elif escolha == "Movimentação e Presença":
         grafico(px.bar(mt_, x="Saídas", y="Motivo", orientation="h", title="Motivos de saída", color_discrete_sequence=[VERMELHO]), 300, False)
 
 # ================================================================ 4. Remuneração e Equidade
-else:
+elif escolha == "Remuneração e Equidade":
     st.title("Remuneração e Equidade")
     st.caption(f"Vencimento por colaborador e por mês ({rotulo_periodo}). Médias calculadas por pessoa.")
     if L.empty:
@@ -732,3 +765,113 @@ else:
         tc = pp.groupby("TipoContrato", as_index=False).agg(Vencimento=("Vencimento", "mean"), Colaboradores=("chave", "count"))
         grafico(px.bar(tc, x="TipoContrato", y="Vencimento", title="Vencimento médio por tipo de contrato", text_auto=".3s",
                        color_discrete_sequence=["#9e1d2c"], hover_data={"Colaboradores": True}, labels={"TipoContrato": "Tipo de contrato"}), 380, False)
+
+
+# ================================================================ 5. Indemnizações
+if escolha == "Indemnizações":
+    st.title("Indemnizações")
+    st.caption("Planos de indemnização (anos completos × vencimento base) e respectivas prestações. "
+               "Os filtros Empresa, Departamento e Colaborador aplicam-se; Ano e Mês escolhem o mês das prestações (por data limite).")
+    ind, pre = carregar_indemnizacoes(versao_f.read_text() if versao_f.exists() else "0")
+    if not meta.get("indemnizacoes"):
+        st.info("As indemnizações não foram lidas: abra uma vez a página Indemnizações do Sistema RH (e cole o endereço do fluxo) "
+                "e depois carregue em «Actualizar dados» no Dashboard.")
+        st.stop()
+    if ind.empty:
+        sem_dados("Ainda não há indemnizações registadas.")
+        st.stop()
+
+    def filtra_ind(df):
+        m = pd.Series(True, index=df.index)
+        if empresas:
+            m &= df["Empresa"].isin(empresas)
+        if departamentos:
+            m &= df["Departamento"].isin(departamentos)
+        if nome_sel != "Todos":
+            m &= df["Nome"].str.casefold() == nome_sel.casefold()
+        return df[m]
+
+    I_ = filtra_ind(ind)
+    P_ = pre[pre["ID_Indemnizacao"].isin(set(I_["ID_Indemnizacao"]))] if not pre.empty else pre
+    hoje = pd.Timestamp(date.today())
+    # mês das prestações: o escolhido na barra lateral, ou o mês actual
+    if ano_sel != "Todos" and mes_sel != "Todos":
+        a_ref, m_ref = int(ano_sel), MESES.index(mes_sel) + 1
+    else:
+        a_ref, m_ref = hoje.year, hoje.month
+    ini_mes = pd.Timestamp(a_ref, m_ref, 1)
+    fim_mes = ini_mes + pd.offsets.MonthEnd(0)
+    do_mes = P_[(P_["limite"] >= ini_mes) & (P_["limite"] <= fim_mes)] if not P_.empty else P_
+    atraso = P_[(~P_["paga"]) & (P_["limite"] < hoje)] if not P_.empty else P_
+    pago = P_.loc[P_["paga"], "Valor"].sum() if not P_.empty else 0.0
+    total = I_["Valor Total"].sum()
+    pagas_por_plano = P_.groupby("ID_Indemnizacao")["paga"].all() if not P_.empty else pd.Series(dtype=bool)
+    concluidos = int(pagas_por_plano.sum()) if len(pagas_por_plano) else 0
+    nome_mes = f"{MESES[m_ref - 1]} {a_ref}"
+
+    kpis([
+        ("Planos de indemnização", inteiro(len(I_)), f"{inteiro(len(I_) - concluidos)} em curso · {inteiro(concluidos)} concluído(s)"),
+        ("Total comprometido", mt_curto(total), f"média {mt(total / len(I_) if len(I_) else 0)} por plano"),
+        ("Valor gasto (pago)", mt_curto(pago), pct(pago / total * 100) + " do total" if total else ""),
+        ("Saldo por pagar", mt_curto(total - pago), "prestações pendentes"),
+        ("Em atraso", mt_curto(atraso["Valor"].sum() if not atraso.empty else 0), f"{inteiro(len(atraso))} prestação(ões) vencida(s)"),
+        (f"Previsto em {nome_mes}", mt_curto(do_mes["Valor"].sum() if not do_mes.empty else 0),
+         f"pago {mt(do_mes.loc[do_mes['paga'], 'Valor'].sum() if not do_mes.empty else 0)}"),
+    ])
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    anos_medios = I_["Anos de Trabalho"].mean() if len(I_) else 0
+    kpis([
+        ("Anos de trabalho (média)", f"{anos_medios:.1f}".replace(".", ","), "anos completos até à saída"),
+        ("Vencimento base médio", mt(I_["Vencimento Base"].mean() if len(I_) else 0), "base do cálculo"),
+        ("Prestações por plano", f"{(I_['Numero Prestacoes'].mean() if len(I_) else 0):.1f}".replace(".", ","), "meses, em média"),
+        ("Prestações pagas", inteiro(P_["paga"].sum() if not P_.empty else 0), f"de {inteiro(len(P_))} no total"),
+        ("Empresas com planos", inteiro(I_["Empresa"].nunique()), ""),
+        ("Saídas indemnizadas no ano", inteiro((I_["saida"].dt.year == hoje.year).sum()), f"em {hoje.year}"),
+    ])
+
+    if not P_.empty:
+        g = P_.dropna(subset=["limite"]).assign(periodo=lambda d: d["limite"].dt.to_period("M").dt.to_timestamp())
+        g = g.assign(Previsto=g["Valor"], Pago=g["Valor"].where(g["paga"], 0.0),
+                     **{"Em atraso": g["Valor"].where((~g["paga"]) & (g["limite"] < hoje), 0.0)})
+        mensal = g.groupby("periodo", as_index=False)[["Previsto", "Pago", "Em atraso"]].sum().sort_values("periodo")
+        mensal["Mês"] = [f"{MESES_CURTOS[p.month - 1]} {p.year}" for p in mensal["periodo"]]
+        fig = go.Figure()
+        fig.add_bar(x=mensal["Mês"], y=mensal["Previsto"], name="Previsto", marker_color="#efb0b6")
+        fig.add_bar(x=mensal["Mês"], y=mensal["Pago"], name="Pago", marker_color="#9e1d2c")
+        fig.add_scatter(x=mensal["Mês"], y=mensal["Em atraso"], name="Em atraso", mode="lines+markers", line=dict(color="#5c0d18", dash="dot"))
+        fig.update_layout(title="Calendário de pagamentos: previsto, pago e em atraso por mês", barmode="overlay")
+        grafico(fig, 380)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        e = I_.groupby("Empresa", as_index=False)["Valor Total"].sum().sort_values("Valor Total")
+        grafico(px.bar(e, x="Valor Total", y="Empresa", orientation="h", title="Total comprometido por empresa", text_auto=".3s",
+                       color_discrete_sequence=[VERMELHO]), 340, False)
+    with c2:
+        d = I_.groupby("Departamento", as_index=False)["Valor Total"].sum().sort_values("Valor Total").tail(12)
+        grafico(px.bar(d, x="Valor Total", y="Departamento", orientation="h", title="Total comprometido por departamento", text_auto=".3s",
+                       color_discrete_sequence=["#7a1220"]), 340, False)
+
+    st.subheader("Planos de indemnização")
+    if not P_.empty:
+        res = P_.assign(Pago=P_["Valor"].where(P_["paga"], 0.0), Pagas=P_["paga"].astype(int), Prestações=1) \
+            .groupby("ID_Indemnizacao")[["Pago", "Pagas", "Prestações"]].sum()
+        prox = P_[~P_["paga"]].sort_values("limite").groupby("ID_Indemnizacao")["limite"].first()
+    else:
+        res, prox = pd.DataFrame(columns=["Pago", "Pagas", "Prestações"]), pd.Series(dtype="datetime64[ns]")
+    t = I_.set_index("ID_Indemnizacao").join(res).join(prox.rename("Próxima"))
+    t = t.fillna({"Pago": 0, "Pagas": 0, "Prestações": 0})
+    st.dataframe(pd.DataFrame({
+        "Plano": t.index, "Colaborador": t["Nome"], "Empresa": t["Empresa"], "Departamento": t["Departamento"],
+        "Saída": t["saida"].dt.strftime("%d/%m/%Y"), "Anos": t["Anos de Trabalho"].astype(int),
+        "Vencimento base": t["Vencimento Base"].map(mt), "Total": t["Valor Total"].map(mt), "Pago": t["Pago"].map(mt),
+        "Saldo": (t["Valor Total"] - t["Pago"]).map(mt), "Prestações pagas": [f"{int(a)} / {int(b)}" for a, b in zip(t["Pagas"], t["Prestações"])],
+        "Próxima prestação": t["Próxima"].dt.strftime("%d/%m/%Y").fillna("—"),
+    }), hide_index=True, width="stretch")
+
+    if not atraso.empty:
+        st.subheader(f"Prestações em atraso ({inteiro(len(atraso))})")
+        st.dataframe(pd.DataFrame({
+            "Colaborador": atraso["Nome"], "Empresa": atraso["Empresa"], "Data limite": atraso["limite"].dt.strftime("%d/%m/%Y"),
+            "Dias de atraso": (hoje - atraso["limite"]).dt.days, "Valor": atraso["Valor"].map(mt),
+        }).sort_values("Dias de atraso", ascending=False), hide_index=True, width="stretch")

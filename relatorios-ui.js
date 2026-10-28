@@ -279,6 +279,12 @@ export function iniciarRelatorios(ctx) {
     if (c.precisa.includes("mes")) { estado("A ler os lançamentos de " + M.NOME_MES[mes - 1] + " " + ano + "…"); base.lancMes = await ctx.carregarMes(ano, mes); }
     if (c.precisa.includes("anterior")) { const a = mes === 1 ? {ano: ano - 1, mes: 12} : {ano, mes: mes - 1}; base.lancAnterior = await ctx.carregarMes(a.ano, a.mes).catch(() => []); }
     if (c.precisa.includes("cadastro")) { estado("A ler o cadastro…"); base.funcionarios = await ctx.funcionarios(); }
+    if (c.precisa.includes("indemnizacoes")) {
+      estado("A ler as indemnizações…");
+      const d = ctx.indemnizacoes ? await ctx.indemnizacoes() : null;
+      if (!d) throw Error("Para este relatório, abra primeiro a página Indemnizações e cole o endereço do fluxo RH_API_Indemnizacoes.");
+      base.indemnizacoes = d.indemnizacoes; base.prestacoes = d.prestacoes;
+    }
     if (c.precisa.includes("doze")) {
       const ultimo = (await ctx.periodoMaisRecente()) || {ano, mes};
       const lista = mesesAte(ultimo);
@@ -289,7 +295,8 @@ export function iniciarRelatorios(ctx) {
     return base;
   }
   const GERADORES = {salarial: R.relatorioSalarial, encargos: R.relatorioEncargos, efectivo: R.relatorioEfectivo,
-    movimentacao: R.relatorioMovimentacao, assiduidade: R.relatorioAssiduidade, evolucao: R.relatorioEvolucao};
+    movimentacao: R.relatorioMovimentacao, assiduidade: R.relatorioAssiduidade, evolucao: R.relatorioEvolucao,
+    indemnizacoes: R.relatorioIndemnizacoes};
 
   async function gerar() {
     if (!ctx.ligado() || aGerar) return;

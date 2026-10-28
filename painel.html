@@ -31,6 +31,8 @@ function ficheirosDados(dados) {
     "dados/funcionarios.json": JSON.stringify(dados.funcionarios || []),
     "dados/lancamentos.json": JSON.stringify(dados.lancamentos || []),
     "dados/meta.json": JSON.stringify(dados.meta || {}),
+    "dados/indemnizacoes.json": JSON.stringify(dados.indemnizacoes || []),
+    "dados/prestacoes.json": JSON.stringify(dados.prestacoes || []),
     "dados/versao.txt": String(versao) + "-" + Date.now()
   };
 }

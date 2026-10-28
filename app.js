@@ -3,7 +3,7 @@ import {iniciarRelatorios} from "./relatorios-ui.js";
 import {iniciarIndemnizacoes} from "./indemnizacoes-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
-import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes} from "./rh-api.js";
+import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
@@ -441,7 +441,7 @@ function ligar(quem,via){
  if(paginaActual==="indemnizacoes")indemn.abrir();
 }
 function desligar(){
- painel.limpar();relatorios.limpar();indemn.limpar();
+ painel.limpar();relatorios.limpar();indemn.limpar();cacheIndemn=null;
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
@@ -527,7 +527,8 @@ const painel=iniciarPainel({
  ligado:()=>ligado,
  funcionarios:forcar=>carregar("funcionarios",forcar).then(()=>linhas("funcionarios","tbl_funcionarios")),
  carregarMes:(ano,mes,forcar)=>carregarMes(ano,mes,forcar),
- periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null)
+ periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null),
+ indemnizacoes:forcar=>lerIndemnizacoes(forcar)
 });
 // ---------- Relatórios formais (PDF e Word) ----------
 const relatorios=iniciarRelatorios({
@@ -536,8 +537,16 @@ const relatorios=iniciarRelatorios({
  carregarMes:(ano,mes)=>carregarMes(ano,mes),
  periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null),
  utilizador:()=>utilizadorActual?.nome||sessaoAcesso()?.email||"",
+ indemnizacoes:()=>lerIndemnizacoes(true),
  aviso:showToast
 });
+// Leitura partilhada das indemnizações (Dashboard e Relatórios). Sem sessão por código ou sem o endereço do fluxo → null.
+let cacheIndemn=null;
+function lerIndemnizacoes(forcar=false){
+ if(!sessaoAcesso()||!urlIndemnizacoes())return Promise.resolve(null);
+ if(!cacheIndemn||forcar)cacheIndemn=indemnizacoesListar({credenciais:sessaoAcesso(),url:urlIndemnizacoes()}).catch(e=>{cacheIndemn=null;throw e});
+ return cacheIndemn;
+}
 // ---------- Indemnizações (fluxo próprio RH_API_Indemnizacoes) ----------
 const indemn=iniciarIndemnizacoes({
  ligado:()=>ligado,
