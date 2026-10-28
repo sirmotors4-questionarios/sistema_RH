@@ -547,6 +547,19 @@ const indemn=iniciarIndemnizacoes({
  funcionarios:()=>dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[],
  podeGravar,
  utilizador:()=>sessaoAcesso()?.email||"",
+ // Saída do colaborador antes da indemnização: Estado = Inactivo + Data de Saída + Motivo, pelo mesmo caminho da ficha (RH_API_Actualizar).
+ registarSaida:async(linha,{data,motivo})=>{
+  if(!urlGravacao())throw Error("Falta o endereço do fluxo RH_API_Actualizar para gravar a saída (cole-o uma vez na ficha de um colaborador).");
+  const original=M.linhaParaFormulario(linha),entrada={...original,Estado:"Inactivo","Data de Saída":data,Motivo:motivo};
+  const funcs=linhas("funcionarios","tbl_funcionarios");
+  const {dados:d,erros}=M.validarColaborador(entrada,"editar",{original,existentes:funcs});
+  if(erros.length)throw Error(erros.join(" "));
+  const pedido=M.prepararGravacao("editar",d,{original,cabecalhos:M.colunas(funcs),utilizador:sessaoAcesso()?.email||""});
+  if(pedido.ignorados.length)throw Error("A tbl_funcionarios não tem a coluna de: "+pedido.ignorados.join(", ")+". A saída não foi gravada.");
+  if(!pedido.alteracoes)return;
+  await gravarColaborador("editar",pedido,{credenciais:sessaoAcesso(),url:urlGravacao()});
+  carregar("funcionarios",true).catch(()=>{});
+ },
  aviso:showToast
 });
 $("btn-preview").addEventListener("click",()=>lanc.preVisualizar());

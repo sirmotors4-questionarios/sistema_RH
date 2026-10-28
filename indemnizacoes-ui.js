@@ -214,61 +214,121 @@ export function iniciarIndemnizacoes(ctx) {
   }
 
   // ---------- nova indemnização ----------
+  // Dois caminhos: colaborador ACTIVO → confirmar que é a pessoa certa e registar a saída (data + motivo) no cadastro;
+  // colaborador INACTIVO (já desactivado na ficha) → segue directo para o plano. Nunca se indemniza alguém activo.
+  const MOTIVOS = ["Rescisão por acordo", "Despedimento", "Fim de contrato", "Demissão (iniciativa do colaborador)", "Extinção do posto de trabalho", "Reforma", "Falecimento", "Outro"];
   function colaboradores() {
     return (ctx.funcionarios() || []).map(l => ({
-      empresa: String(M.campo(l, "Empresa") || "").trim(), codigo: M.normalizarCodigo ? M.normalizarCodigo(M.campo(l, "Codigo")) : String(M.campo(l, "Codigo")),
+      linha: l,
+      empresa: String(M.campo(l, "Empresa") || "").trim(), codigo: M.normalizarCodigo(M.campo(l, "Codigo")),
       nome: String(M.campo(l, "Nome") || "").trim(), departamento: String(M.campo(l, "Departamento") || "").trim(),
+      profissao: String(M.campo(l, "Profissao", "Profissão") || "").trim(), estado: String(M.campo(l, "Estado") || "").trim(),
       admissao: M.data(M.campo(l, "Data Admissao", "Data de Admissão", "Data Admissão")),
-      saida: M.data(M.campo(l, "Data Saida", "Data de Saída", "Data Saída")),
-      base: M.numero(M.campo(l, "Vencimento Base", "Vencimento", "Salario Base")) ?? null
+      saida: M.data(M.campo(l, "Data de Saída", "Data Saida", "Data de Saida", "Data Saída")),
+      motivo: String(M.campo(l, "Motivo", "Motivo Saida", "Motivo de Saída", "Motivo de saída") || "").trim(),
+      base: M.numero(M.campo(l, "Vencimento Base", "Vencimento", "Salario Base"))
     })).filter(c => c.nome);
   }
+  const campo = (rot, input, ajuda) => el("label", {class: "ind-campo"}, rot, input, ajuda ? el("small", {text: ajuda}) : null);
+  const ficha = c => el("div", {class: "ind-ficha"},
+    ...[["Colaborador", c.nome], ["Código", c.codigo], ["Empresa", c.empresa], ["Departamento", c.departamento || "—"], ["Profissão", c.profissao || "—"],
+      ["Admissão", dataPt(c.admissao)], ["Vencimento base", c.base != null ? fmt(c.base) + " MT" : "—"], ["Estado", c.estado || "—"]]
+      .map(([k, v]) => el("div", {}, el("span", {text: k}), el("b", {text: v}))));
+
   function novo() {
     if (!ctx.ligado()) { ctx.aviso("Inicie sessão para registar indemnizações."); return; }
     if (!dados) { ctx.aviso("Aguarde a leitura das indemnizações."); carregar(); return; }
     if (!podeGravar()) return;
+    passoEscolher();
+  }
+
+  // Passo 1 — escolher o colaborador.
+  function passoEscolher() {
     const lista = colaboradores();
+    abrirDlg({eyebrow: "NOVA INDEMNIZAÇÃO · 1 DE 3", titulo: "Escolher o colaborador", sub: "Pesquise pelo código ou pelo nome."});
+    const dl = el("datalist", {id: "ind-colabs"}, ...lista.map(c => el("option", {value: c.codigo + " · " + c.nome + " · " + c.empresa, label: M.activo(c.estado) ? "Activo" : "Inactivo"})));
+    const inp = el("input", {id: "ind-f-colab", list: "ind-colabs", placeholder: lista.length ? "Código ou nome…" : "A carregar colaboradores…", autocomplete: "off"});
+    $("ind-dlg-body").replaceChildren(dl, el("div", {class: "ind-form ind-form-1"}, campo("Colaborador", inp)));
+    const escolher = () => {
+      const v = inp.value.trim(), [cod, , emp] = v.split("·").map(x => (x || "").trim());
+      const c = lista.find(x => x.codigo === M.normalizarCodigo(cod) && (!emp || x.empresa === emp));
+      if (!c) throw Error("Escolha um colaborador da lista.");
+      const activa = dados.lista.find(x => x.empresa === c.empresa && M.normalizarCodigo(x.codigo) === c.codigo && !/anulad/i.test(x.estado));
+      if (activa) throw Error("Já existe o plano " + activa.id + " para " + c.nome + ". Anule-o antes de criar outro.");
+      passoConfirmar(c);
+    };
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); try { escolher(); } catch (x) { $("ind-dlg-erro").textContent = x.message; } } });
+    accoes([{texto: "Cancelar", click: fechar}, {texto: "Continuar", classe: "primary", click: async () => escolher()}]);
+    inp.focus();
+  }
+
+  // Passo 2 — confirmar a pessoa; se estiver activa, registar a saída antes do plano.
+  function passoConfirmar(c) {
+    const activo = M.activo(c.estado);
+    abrirDlg({eyebrow: "NOVA INDEMNIZAÇÃO · 2 DE 3", titulo: "Confirmar o colaborador", sub: activo
+      ? "Este colaborador está ACTIVO. Para não indemnizar alguém que continua na empresa, registe primeiro a saída."
+      : "Colaborador inactivo: a saída já está registada no cadastro."});
+    const hoje = hojeIso();
+    const fData = el("input", {id: "ind-f-saida", type: "date", value: c.saida || hoje, max: "2100-12-31", min: c.admissao || ""});
+    const fMotivo = el("select", {id: "ind-f-motivo"}, el("option", {value: "", text: "Escolha o motivo…"}), ...MOTIVOS.map(m => el("option", {value: m, text: m})));
+    const fOutro = el("input", {id: "ind-f-motivo-outro", maxLength: 100, placeholder: "Descreva o motivo", hidden: true});
+    const lOutro = campo("Outro motivo", fOutro); lOutro.hidden = true; fOutro.hidden = false;
+    fMotivo.addEventListener("change", () => { lOutro.hidden = fMotivo.value !== "Outro"; if (!lOutro.hidden) fOutro.focus(); });
+    const fRef = el("input", {id: "ind-f-ref-inactivo", type: "date", value: c.saida || "", min: c.admissao || ""});
+    const confirma = el("input", {type: "checkbox", id: "ind-f-confirma"});
+    $("ind-dlg-body").replaceChildren(
+      ficha(c),
+      el("label", {class: "ind-confirma"}, confirma, " Confirmo que é este o colaborador a indemnizar."),
+      activo
+        ? el("div", {class: "ind-saida"}, el("h3", {text: "Registar a saída"}),
+            el("p", {class: "rel-nota", text: "Ao continuar, a ficha passa a Inactivo com esta data e motivo (gravado na tbl_funcionarios). A indemnização conta os anos até à data de saída."}),
+            el("div", {class: "ind-form"}, campo("Data de saída", fData), campo("Motivo da saída", fMotivo), lOutro))
+        : el("div", {class: "ind-saida"},
+            el("p", {class: "rel-nota", text: c.saida ? "Saída registada em " + dataPt(c.saida) + (c.motivo ? " · motivo: " + c.motivo : "") + ". Os anos de trabalho contam até essa data."
+              : "A ficha está inactiva mas não tem data de saída. Indique a data a usar no cálculo (recomenda-se corrigir também a ficha)."}),
+            c.saida ? null : el("div", {class: "ind-form"}, campo("Data de saída para o cálculo", fRef))));
+    accoes([
+      {texto: "Voltar", click: async () => passoEscolher()},
+      {texto: activo ? "Sim, registar saída e continuar" : "Sim, continuar para o plano", classe: "primary", ocupado: "A gravar a saída…", click: async () => {
+        if (!confirma.checked) throw Error("Confirme que é este o colaborador.");
+        if (!activo) {
+          const ref = c.saida || fRef.value;
+          if (!M.data(ref)) throw Error("Indique a data de saída para o cálculo.");
+          passoPlano(c, ref);
+          return;
+        }
+        const data = fData.value, motivo = fMotivo.value === "Outro" ? fOutro.value.trim() : fMotivo.value;
+        if (!M.data(data)) throw Error("Indique a data de saída.");
+        if (c.admissao && data < c.admissao) throw Error("A data de saída não pode ser anterior à admissão (" + dataPt(c.admissao) + ").");
+        if (!motivo) throw Error("Indique o motivo da saída.");
+        await ctx.registarSaida(c.linha, {data, motivo});
+        ctx.aviso(c.nome + " passou a Inactivo (saída em " + dataPt(data) + ").");
+        passoPlano({...c, estado: "Inactivo", saida: data, motivo}, data);
+      }}]);
+  }
+
+  // Passo 3 — cálculo e plano de pagamento (a data de referência é a data de saída).
+  function passoPlano(c, referencia) {
     const hoje = hojeIso(), prox = new Date(Date.UTC(Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7)), 1));
-    const st = {c: null, plano: []};
-    abrirDlg({eyebrow: "NOVA INDEMNIZAÇÃO", titulo: "Nova indemnização", sub: "Escolha o colaborador; o sistema calcula os anos completos e o valor (anos × vencimento base)."});
-    const dl = el("datalist", {id: "ind-colabs"}, ...lista.map(c => el("option", {value: c.codigo + " · " + c.nome + " · " + c.empresa})));
+    const st = {plano: []};
+    abrirDlg({eyebrow: "NOVA INDEMNIZAÇÃO · 3 DE 3", titulo: "Plano de pagamento · " + c.nome, sub: "Anos completos de " + dataPt(c.admissao) + " até à saída em " + dataPt(referencia) + " × vencimento base."});
     const f = {
-      colab: el("input", {id: "ind-f-colab", list: "ind-colabs", placeholder: lista.length ? "Código ou nome…" : "A carregar colaboradores…", autocomplete: "off"}),
-      adm: el("input", {id: "ind-f-adm", type: "date"}), ref: el("input", {id: "ind-f-ref", type: "date", value: hoje}),
-      base: el("input", {id: "ind-f-base", type: "number", min: "0", step: "0.01"}),
+      adm: el("input", {id: "ind-f-adm", type: "date", value: c.admissao || ""}),
+      base: el("input", {id: "ind-f-base", type: "number", min: "0", step: "0.01", value: c.base != null ? String(c.base) : ""}),
       n: el("input", {id: "ind-f-n", type: "number", min: "1", max: "120", step: "1", value: "6"}),
       dia: el("input", {id: "ind-f-dia", type: "number", min: "1", max: "31", step: "1", value: "25"}),
       mes: el("input", {id: "ind-f-mes", type: "month", value: prox.toISOString().slice(0, 7)}),
-      obs: el("input", {id: "ind-f-obs", maxLength: 200, placeholder: "Opcional"})
+      obs: el("input", {id: "ind-f-obs", maxLength: 200, placeholder: "Opcional", value: c.motivo ? "Motivo da saída: " + c.motivo : ""})
     };
     const calc = el("div", {class: "ind-calc"}), planoBox = el("div", {class: "ind-plano"});
-    const campo = (rot, input, ajuda) => el("label", {class: "ind-campo"}, rot, input, ajuda ? el("small", {text: ajuda}) : null);
-    $("ind-dlg-body").replaceChildren(dl,
+    $("ind-dlg-body").replaceChildren(
       el("div", {class: "ind-form"},
-        campo("Colaborador", f.colab), campo("Data de admissão", f.adm, "Do cadastro; pode corrigir."),
-        campo("Data de referência", f.ref, "Data de saída ou da decisão."), campo("Vencimento base (MT)", f.base, "Do cadastro; pode corrigir."),
-        campo("Número de meses", f.n), campo("Dia limite de cada mês", f.dia, "Se o mês não tiver esse dia, usa o último."),
-        campo("Primeiro mês", f.mes), campo("Observações", f.obs)),
+        campo("Data de admissão", f.adm, "Do cadastro; pode corrigir."), campo("Data de saída", el("input", {type: "date", value: referencia, disabled: true}), "Registada no passo anterior."),
+        campo("Vencimento base (MT)", f.base, "Do cadastro; pode corrigir."), campo("Número de meses", f.n),
+        campo("Dia limite de cada mês", f.dia, "Se o mês não tiver esse dia, usa o último."), campo("Primeiro mês", f.mes), campo("Observações", f.obs)),
       calc, planoBox);
-    const escolher = () => {
-      const v = f.colab.value.trim(), cod = v.split("·")[0].trim(), emp = (v.split("·")[2] || "").trim();
-      const c = lista.find(x => x.codigo === (M.normalizarCodigo ? M.normalizarCodigo(cod) : cod) && (!emp || x.empresa === emp));
-      st.c = c || null;
-      if (c) { f.adm.value = c.admissao || ""; if (c.base != null) f.base.value = String(c.base); if (c.saida) f.ref.value = c.saida; }
-      refazer();
-    };
-    const refazer = () => {
-      const r = I.calcular({admissao: f.adm.value, referencia: f.ref.value, vencimentoBase: f.base.value});
-      st.total = r.total; st.anos = r.anos;
-      calc.replaceChildren(
-        el("div", {}, el("span", {text: "Anos completos"}), el("b", {text: String(r.anos)})),
-        el("div", {}, el("span", {text: "Vencimento base"}), el("b", {text: fmt(r.base)})),
-        el("div", {class: "total"}, el("span", {text: "Indemnização"}), el("b", {text: fmt(r.total) + " MT"})));
-      st.plano = I.gerarPlano(r.total, f.n.value, f.dia.value, f.mes.value);
-      desenharPlano();
-    };
     const desenharPlano = () => {
-      if (!st.plano.length) { planoBox.replaceChildren(el("p", {class: "ind-sem", text: st.c ? "Sem valor a pagar: verifique as datas e o vencimento base." : "Escolha o colaborador para ver o plano."})); return; }
+      if (!st.plano.length) { planoBox.replaceChildren(el("p", {class: "ind-sem", text: "Sem valor a pagar: verifique a admissão e o vencimento base."})); return; }
       const soma = st.plano.reduce((s, p) => s + Number(p.valor), 0);
       planoBox.replaceChildren(el("h3", {text: "Plano de pagamento · " + st.plano.length + " prestação(ões)"}),
         el("div", {class: "table-scroll"}, el("table", {class: "rel-table"},
@@ -280,18 +340,24 @@ export function iniciarIndemnizacoes(ctx) {
           })),
           el("tfoot", {}, el("tr", {}, el("td", {text: "Total"}), el("td"), el("td", {class: "num", text: fmt(soma)}))))));
     };
-    f.colab.addEventListener("change", escolher);
-    [f.adm, f.ref, f.base, f.n, f.dia, f.mes].forEach(x => x.addEventListener("input", refazer));
+    const refazer = () => {
+      const r = I.calcular({admissao: f.adm.value, referencia, vencimentoBase: f.base.value});
+      st.total = r.total;
+      calc.replaceChildren(
+        el("div", {}, el("span", {text: "Anos completos"}), el("b", {text: String(r.anos)})),
+        el("div", {}, el("span", {text: "Vencimento base"}), el("b", {text: fmt(r.base)})),
+        el("div", {class: "total"}, el("span", {text: "Indemnização"}), el("b", {text: fmt(r.total) + " MT"})));
+      st.plano = I.gerarPlano(r.total, f.n.value, f.dia.value, f.mes.value);
+      desenharPlano();
+    };
+    [f.adm, f.base, f.n, f.dia, f.mes].forEach(x => x.addEventListener("input", refazer));
     refazer();
-    accoes([{texto: "Cancelar", click: fechar}, {texto: "Gravar indemnização e plano", classe: "primary", click: async () => {
-      if (!st.c) throw Error("Escolha um colaborador da lista.");
+    accoes([{texto: "Fechar", click: fechar}, {texto: "Gravar indemnização e plano", classe: "primary", click: async () => {
       if (!(st.total > 0)) throw Error("A indemnização é 0: o colaborador não tem anos completos ou falta o vencimento base.");
       const erros = I.validarPlano(st.plano, st.total);
       if (erros.length) throw Error(erros.join(" "));
-      const activa = dados.lista.find(x => x.empresa === st.c.empresa && M.normalizarCodigo(x.codigo) === st.c.codigo && !/anulad/i.test(x.estado));
-      if (activa) throw Error("Já existe o plano " + activa.id + " para este colaborador. Anule-o antes de criar outro.");
-      const r = await indemnizacaoGravar({empresa: st.c.empresa, codigo: st.c.codigo, nome: st.c.nome, departamento: st.c.departamento,
-        dataAdmissao: f.adm.value, dataReferencia: f.ref.value, vencimentoBase: Number(f.base.value), diaLimite: Number(f.dia.value),
+      const r = await indemnizacaoGravar({empresa: c.empresa, codigo: c.codigo, nome: c.nome, departamento: c.departamento,
+        dataAdmissao: f.adm.value, dataReferencia: referencia, vencimentoBase: Number(f.base.value), diaLimite: Number(f.dia.value),
         primeiroMes: f.mes.value, observacoes: f.obs.value.trim(), prestacoes: st.plano}, deps());
       fechar(); ctx.aviso("Indemnização " + r.id + " gravada: " + fmt(r.total) + " MT em " + r.prestacoes + " prestação(ões).");
       const [a, m] = f.mes.value.split("-").map(Number); vista = {ano: a, mes: m};

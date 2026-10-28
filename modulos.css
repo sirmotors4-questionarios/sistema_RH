@@ -287,3 +287,11 @@ th.num .th-ordem{flex-direction:row-reverse}
 .ind-plano h3{font-size:14px;margin:0 0 8px}
 .ind-plano input[type=date]{border:1px solid #dce3eb;border-radius:6px;padding:5px 8px;font:inherit}
 .ind-prest{display:flex;flex-direction:column;gap:14px;max-width:420px}
+.ind-ficha{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.ind-ficha div{border:1px solid #eef1f5;border-radius:10px;padding:8px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.ind-ficha span{font-size:11px;color:#738092}.ind-ficha b{font-size:14px;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:720px){.ind-ficha{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ind-confirma{display:flex;align-items:center;gap:8px;font-weight:600;margin:4px 0 16px}
+.ind-saida h3{font-size:14px;margin:0 0 8px}
+.ind-campo select{border:1px solid #dce3eb;border-radius:8px;padding:9px 10px;font:inherit;font-weight:500;background:#fff}
+.ind-form-1{grid-template-columns:minmax(0,1fr)}
