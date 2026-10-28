@@ -26,8 +26,8 @@ export const CATALOGO = Object.freeze([
    descricao: "Admissões e saídas no ano, com lista nominal, motivos, saldo e taxa de rotatividade."},
   {id: "assiduidade", titulo: "Relatório de Assiduidade e Horas Extra", icone: "◷", precisa: ["mes"],
    descricao: "Faltas justificadas e injustificadas e horas extra do mês, por departamento e por colaborador."},
-  {id: "evolucao", titulo: "Relatório de Custos com Pessoal — 12 meses", icone: "↗", precisa: ["doze"],
-   descricao: "Evolução mensal do efectivo processado, massa salarial, encargos e custo total nos últimos 12 meses, com totais por empresa."},
+  {id: "evolucao", titulo: "Relatório de Custos com Pessoal — 12 meses", icone: "↗", precisa: ["doze", "indemnizacoes_opcional"],
+   descricao: "Evolução mensal do efectivo processado, massa salarial, encargos, indemnizações pagas e custo total nos últimos 12 meses, com totais por empresa."},
   {id: "indemnizacoes", titulo: "Relatório de Indemnizações", icone: "◈", precisa: ["indemnizacoes"],
    descricao: "Responsabilidades com indemnizações: planos em curso, prestações do mês, valores pagos, saldo, atrasos e calendário dos próximos 12 meses, por empresa."}
 ]);
@@ -320,45 +320,58 @@ export function relatorioAssiduidade({lancMes, ano, mes, empresa = ""}) {
 }
 
 // ---------------------------------------------------------------- 6. evolução 12 meses
-export function relatorioEvolucao({lancPorMes, empresa = ""}) {
-  // lancPorMes: [{ano, mes, linhas}] do mais antigo para o mais recente
+export function relatorioEvolucao({lancPorMes, empresa = "", indemnizacoes = null, prestacoes = []}) {
+  // lancPorMes: [{ano, mes, linhas}] do mais antigo para o mais recente.
+  // Indemnizações pagas entram no custo do mês do pagamento (Data Pagamento; sem ela, a data limite).
+  const comInd = Array.isArray(indemnizacoes);
+  const planos = comInd ? I.indemnizacoes(indemnizacoes).filter(i => !/anulad/i.test(i.estado) && (!empresa || i.empresa.toUpperCase() === empresa.toUpperCase())) : [];
+  const porId = new Map(planos.map(i => [i.id, i]));
+  const pagas = comInd ? I.prestacoes(prestacoes).filter(p => I.paga(p) && porId.has(p.indemnizacao)) : [];
+  const indMes = (ano, mes) => { const k = ano + "-" + String(mes).padStart(2, "0"); return pagas.filter(p => (p.dataPagamento || p.dataLimite || "").slice(0, 7) === k); };
   const meses = lancPorMes.map(({ano, mes, linhas}) => {
-    const L = folha(linhas, ano, mes, empresa);
-    return {ano, mes, L, n: L.length, venc: somar(L, "vencimento"), inssEmp: somar(L, "inssEmp"), custo: somar(L, "custo"), liq: somar(L, "liquido"), irps: somar(L, "irps"), inss: somar(L, "inss")};
+    const L = folha(linhas, ano, mes, empresa), P = indMes(ano, mes);
+    const salarial = somar(L, "custo"), ind = P.reduce((s, p) => s + p.valor, 0);
+    return {ano, mes, L, P, n: L.length, venc: somar(L, "vencimento"), inssEmp: somar(L, "inssEmp"), salarial, ind, custo: salarial + ind,
+      liq: somar(L, "liquido"), irps: somar(L, "irps"), inss: somar(L, "inss")};
   });
-  const com = meses.filter(m => m.n);
+  const com = meses.filter(m => m.n || m.ind);
   const prim = lancPorMes[0], ult = lancPorMes[lancPorMes.length - 1];
   const r = cabecalho("evolucao", {periodo: prim ? `${M.NOME_MES[prim.mes - 1]} ${prim.ano} a ${M.NOME_MES[ult.mes - 1]} ${ult.ano}` : "", ambito: textoEmpresa(empresa)});
   if (!com.length) { r.vazio = "Não há lançamentos nos últimos 12 meses."; return r; }
   const tot = k => com.reduce((s, m) => s + m[k], 0);
-  const a = com[0], b = com[com.length - 1];
+  const comL = com.filter(m => m.n), a = comL[0] || com[0], b = comL[comL.length - 1] || com[com.length - 1];
   r.kpis = [
-    {rotulo: "Custo total no período", valor: mt(tot("custo")) + " MT", nota: int(com.length) + " meses com lançamentos"},
-    {rotulo: "Custo médio mensal", valor: mt(tot("custo") / com.length) + " MT", nota: "vencimento + INSS empresa"},
+    {rotulo: "Custo total no período", valor: mt(tot("custo")) + " MT", nota: tot("ind") ? "inclui " + mt(tot("ind")) + " MT de indemnizações" : int(com.length) + " meses com lançamentos"},
+    {rotulo: "Custo médio mensal", valor: mt(tot("custo") / com.length) + " MT", nota: "salarial + indemnizações"},
     {rotulo: "Massa salarial no período", valor: mt(tot("venc")) + " MT", nota: "vencimento"},
     {rotulo: "Encargos (INSS + IRPS)", valor: mt(tot("inss") + tot("inssEmp") + tot("irps")) + " MT", nota: "no período"},
-    {rotulo: "Efectivo processado", valor: int(b.n), nota: `${M.NOME_MES[b.mes - 1]} ${b.ano} (início: ${int(a.n)})`},
+    {rotulo: "Indemnizações pagas", valor: mt(tot("ind")) + " MT", nota: comInd ? pct(tot("ind"), tot("custo")) + " do custo total" : "não lidas (página Indemnizações por ligar)"},
     {rotulo: "Variação do custo", valor: varPct(b.custo, a.custo), nota: `${M.NOME_MES[b.mes - 1]} face a ${M.NOME_MES[a.mes - 1]}`}
   ];
   r.secoes.push({titulo: "1. Síntese", paragrafos: [
-    `No período de ${r.periodo}, o custo com pessoal (${textoEmpresa(empresa).toLowerCase()}) totalizou ${mt(tot("custo"))} MT, uma média de ${mt(tot("custo") / com.length)} MT por mês.`,
-    `Entre ${M.NOME_MES[a.mes - 1]} ${a.ano} e ${M.NOME_MES[b.mes - 1]} ${b.ano}, o custo mensal passou de ${mt(a.custo)} MT para ${mt(b.custo)} MT (${varPct(b.custo, a.custo)}) e o efectivo processado de ${int(a.n)} para ${int(b.n)} colaboradores.`]});
+    `No período de ${r.periodo}, o custo com pessoal (${textoEmpresa(empresa).toLowerCase()}) totalizou ${mt(tot("custo"))} MT, uma média de ${mt(tot("custo") / com.length)} MT por mês` +
+      (tot("ind") ? `, dos quais ${mt(tot("salarial"))} MT de custo salarial (vencimento + INSS da empresa) e ${mt(tot("ind"))} MT de indemnizações pagas (${pct(tot("ind"), tot("custo"))}).` : "."),
+    `Entre ${M.NOME_MES[a.mes - 1]} ${a.ano} e ${M.NOME_MES[b.mes - 1]} ${b.ano}, o custo mensal passou de ${mt(a.custo)} MT para ${mt(b.custo)} MT (${varPct(b.custo, a.custo)}) e o efectivo processado de ${int(a.n)} para ${int(b.n)} colaboradores.`]
+    .concat(comInd ? [] : ["As indemnizações não foram incluídas porque a página Indemnizações ainda não está ligada neste navegador."])});
   let antC = null;
   r.secoes.push({titulo: "2. Evolução mensal", tabela: {
-    cols: [{t: "Mês"}, {t: "Colab.", num: true}, {t: "Vencimento", num: true}, {t: "INSS empresa", num: true}, {t: "Custo total", num: true}, {t: "Líquido", num: true}, {t: "Var. custo", num: true}],
-    linhas: meses.map(m => { const lin = [M.NOME_MES[m.mes - 1] + " " + m.ano, m.n ? int(m.n) : "—", m.n ? mt(m.venc) : "—", m.n ? mt(m.inssEmp) : "—", m.n ? mt(m.custo) : "—", m.n ? mt(m.liq) : "—", m.n && antC ? varPct(m.custo, antC) : "—"]; if (m.n) antC = m.custo; return lin; }),
-    total: ["Total", "", mt(tot("venc")), mt(tot("inssEmp")), mt(tot("custo")), mt(tot("liq")), ""]}});
+    cols: [{t: "Mês"}, {t: "Colab.", num: true}, {t: "Vencimento", num: true}, {t: "INSS empresa", num: true}, {t: "Custo salarial", num: true}, {t: "Indemnizações", num: true}, {t: "Custo total", num: true}, {t: "Var. custo", num: true}],
+    linhas: meses.map(m => { const tem = m.n || m.ind; const lin = [M.NOME_MES[m.mes - 1] + " " + m.ano, m.n ? int(m.n) : "—", m.n ? mt(m.venc) : "—", m.n ? mt(m.inssEmp) : "—", m.n ? mt(m.salarial) : "—", m.ind ? mt(m.ind) : "—", tem ? mt(m.custo) : "—", tem && antC ? varPct(m.custo, antC) : "—"]; if (tem) antC = m.custo; return lin; }),
+    total: ["Total", "", mt(tot("venc")), mt(tot("inssEmp")), mt(tot("salarial")), mt(tot("ind")), mt(tot("custo")), ""]}});
   if (!empresa) {
-    const todas = com.flatMap(m => m.L);
-    const g = agrupar(todas, l => l.empresa, {venc: l => l.vencimento, ie: l => l.inssEmp, custo: l => l.custo});
-    r.secoes.push({titulo: "3. Por empresa (período)", tabela: {cols: [{t: "Empresa"}, {t: "Vencimento", num: true}, {t: "INSS empresa", num: true}, {t: "Custo total", num: true}, {t: "% do custo", num: true}],
-      linhas: g.sort((x, y) => y.custo - x.custo).map(x => [x.chave, mt(x.venc), mt(x.ie), mt(x.custo), pct(x.custo, tot("custo"))]),
-      total: ["Total", mt(tot("venc")), mt(tot("inssEmp")), mt(tot("custo")), "100,0%"]}});
+    const g = agrupar(com.flatMap(m => m.L), l => l.empresa, {venc: l => l.vencimento, ie: l => l.inssEmp, custo: l => l.custo});
+    const indEmp = new Map();
+    for (const p of com.flatMap(m => m.P)) { const e = porId.get(p.indemnizacao)?.empresa || "(Sem informação)"; indEmp.set(e, (indEmp.get(e) || 0) + p.valor); }
+    for (const [e] of indEmp) if (!g.some(x => x.chave === e)) g.push({chave: e, n: 0, venc: 0, ie: 0, custo: 0});
+    r.secoes.push({titulo: "3. Por empresa (período)", tabela: {cols: [{t: "Empresa"}, {t: "Vencimento", num: true}, {t: "INSS empresa", num: true}, {t: "Custo salarial", num: true}, {t: "Indemnizações", num: true}, {t: "Custo total", num: true}, {t: "% do custo", num: true}],
+      linhas: g.map(x => ({...x, ind: indEmp.get(x.chave) || 0})).sort((x, y) => (y.custo + y.ind) - (x.custo + x.ind))
+        .map(x => [x.chave, mt(x.venc), mt(x.ie), mt(x.custo), x.ind ? mt(x.ind) : "—", mt(x.custo + x.ind), pct(x.custo + x.ind, tot("custo"))]),
+      total: ["Total", mt(tot("venc")), mt(tot("inssEmp")), mt(tot("salarial")), mt(tot("ind")), mt(tot("custo")), "100,0%"]}});
   }
-  r.notas.push("Meses sem lançamentos aparecem com «—» e não entram nas médias.");
+  r.notas.push("Custo total = vencimento + INSS a cargo da empresa + indemnizações pagas no mês (pela data de pagamento).");
+  r.notas.push("Meses sem lançamentos nem pagamentos aparecem com «—» e não entram nas médias.");
   return r;
 }
-
 
 // ---------- Indemnizações ----------
 // indemnizacoes/prestacoes: linhas de tbl_indemnizacoes e tbl_indemnizacoes_prestacoes. Planos anulados ficam de fora.
