@@ -18,15 +18,16 @@ const mockEmployees = [
 ];
 const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
-const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",contratos:"Contratos",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
+const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
-const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios"],contratos:["contratos","funcionarios"],adendas:["contratos"],salarios:["lancamentos"],ferias:["ferias"]};
+const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos"],salarios:["lancamentos"],ferias:["ferias"]};
 
 const dados={};          // módulo -> {tabelas, carregado}
 const pedidos={};        // módulo -> Promise em curso
 let ligado=false, paginaActual="dashboard", utilizadorActual=null;
 
-function go(page){
+function go(page,foco){
+ if(page==="contratos"){page="colaboradores";foco=foco||"colab-contratos"} // a antiga página Contratos faz agora parte de Colaboradores
  if(page==="configuracoes"){window.location.href="configuracoes.html";return;}
  if(!Object.hasOwn(labels,page))return;
  paginaActual=page;
@@ -34,13 +35,14 @@ function go(page){
  document.querySelectorAll("[data-page]").forEach(el=>el.classList.toggle("active",el.dataset.page===page));
  $("crumb").textContent=labels[page];
  $("sidebar").classList.remove("open");
- window.scrollTo({top:0,behavior:"instant"});
+ const alvo=foco&&$(foco);
+ if(alvo)requestAnimationFrame(()=>alvo.scrollIntoView({behavior:"smooth",block:"start"}));else window.scrollTo({top:0,behavior:"instant"});
  if(ligado)(precisa[page]||[]).forEach(m=>carregar(m));
  if(page==="painel")painel.abrir();
  if(page==="relatorios")relatorios.abrir();
 }
 document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
-document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go)));
+document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go,el.dataset.foco)));
 $("menu-toggle").addEventListener("click",()=>$("sidebar").classList.toggle("open"));
 function showToast(message){const t=$("toast");t.textContent=message;t.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>t.classList.remove("show"),4500)}
 // ---------- lançamentos gravados em segundo plano: o Excel Online demora ~15–20 s por gravação ----------
@@ -192,12 +194,14 @@ function cascata(lista,selEmp,selDep){
 }
 function renderEmployees(){
  const lista=dados.funcionarios?M.colaboradores(linhas("funcionarios","tbl_funcionarios")):mockEmployees;
- const emp=$("employee-company"),dep=$("employee-department"),filtro=$("employee-filter");
+ const emp=$("employee-company"),dep=$("employee-department"),filtro=$("employee-filter"),ctr=$("employee-contract");
  cascata(lista,emp,dep);
- const result=M.filtrarColaboradores(lista,$("employee-search").value,filtro.value,{empresa:emp.value,departamento:dep.value});
+ opcoesContrato(lista,ctr);
+ const result=M.filtrarColaboradores(lista,$("employee-search").value,filtro.value,{empresa:emp.value,departamento:dep.value})
+  .filter(e=>!ctr.value||(e.contrato||SEM_CONTRATO)===ctr.value);
  const tbody=$("employees-body");tbody.replaceChildren();
- if(!result.length)emptyRow(tbody,8,"Nenhum colaborador corresponde aos filtros.");
- result.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.profissao);cell(tr,e.regime);stateCell(tr,e.estado);
+ if(!result.length)emptyRow(tbody,9,"Nenhum colaborador corresponde aos filtros.");
+ result.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.profissao);cell(tr,e.contrato||"—");cell(tr,e.regime);stateCell(tr,e.estado);
   const td=document.createElement("td"),btn=document.createElement("button");btn.type="button";btn.className="inline-btn";btn.textContent="Abrir ficha";btn.setAttribute("aria-label","Abrir ficha de "+e.nome+" ("+e.codigo+" · "+e.empresa+")");
   const abrir=()=>{if(!e.linha){showToast("Ficha disponível depois de entrar com o código de acesso.");return}ficha.ver(e.linha)};
   btn.addEventListener("click",ev=>{ev.stopPropagation();abrir()});tr.addEventListener("click",abrir);td.append(btn);tr.append(td);tbody.append(tr)});
@@ -205,17 +209,37 @@ function renderEmployees(){
   ?result.length+" de "+lista.length+" colaborador(es)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS+", refine a pesquisa":"")
   :result.length+" registo(s) demonstrativo(s)";
 }
+// Contratos (parte da página Colaboradores): tipos de contrato e regimes vêm do cadastro;
+// os parâmetros de pagamento vigentes vêm do módulo «contratos». Cada parte aparece assim que os seus dados chegam.
+const SEM_CONTRATO="Sem tipo de contrato";
+function opcoesContrato(lista,sel){
+ const actual=sel.value,tipos=[...new Set(lista.map(e=>e.contrato||SEM_CONTRATO))].sort((a,b)=>a.localeCompare(b,"pt"));
+ sel.replaceChildren(new Option("Todos",""),...tipos.map(t=>new Option(t,t)));
+ sel.value=tipos.includes(actual)?actual:"";
+}
+function filtrarPorContrato(tipo){
+ const sel=$("employee-contract");sel.value=sel.value===tipo?"":tipo;renderEmployees();renderContratos();
+ $("employee-search").closest(".panel").scrollIntoView({behavior:"smooth",block:"start"});
+ showToast(sel.value?"Lista filtrada: "+tipo+".":"Filtro de contrato removido.");
+}
 function renderContratos(){
- if(!dados.contratos)return;
+ if(!dados.contratos&&!dados.funcionarios)return;
  showLoaded("contratos",true);
  const body=$("params-body");body.replaceChildren();
- const params=M.parametrosVigentes(linhas("contratos","tbl_parametros_pagamento"),hoje());
- if(!params.length)emptyRow(body,6,"Sem parâmetros vigentes hoje.");
- params.forEach(p=>{const tr=document.createElement("tr");cell(tr,p.regime,{strong:true});cell(tr,p.categoria||"Todas");cell(tr,M.formatarValor(p.valor),{num:true});cell(tr,p.unidade);cell(tr,M.formatarData(p.inicio));cell(tr,p.fim?M.formatarData(p.fim):"—");body.append(tr)});
- const activos=M.colaboradores(linhas("funcionarios","tbl_funcionarios")).filter(c=>M.activo(c.estado));
- [["contract-types",c=>c.contrato],["regimes",c=>c.regime]].forEach(([id,fn])=>{const b=$(id);b.replaceChildren();
+ if(!dados.contratos)emptyRow(body,6,"A carregar parâmetros de pagamento…","loading");
+ else{
+  const params=M.parametrosVigentes(linhas("contratos","tbl_parametros_pagamento"),hoje());
+  if(!params.length)emptyRow(body,6,"Sem parâmetros vigentes hoje.");
+  params.forEach(p=>{const tr=document.createElement("tr");cell(tr,p.regime,{strong:true});cell(tr,p.categoria||"Todas");cell(tr,M.formatarValor(p.valor),{num:true});cell(tr,p.unidade);cell(tr,M.formatarData(p.inicio));cell(tr,p.fim?M.formatarData(p.fim):"—");body.append(tr)});
+ }
+ const activos=dados.funcionarios?M.colaboradores(linhas("funcionarios","tbl_funcionarios")).filter(c=>M.activo(c.estado)):[];
+ const escolhido=$("employee-contract").value;
+ [["contract-types",c=>c.contrato||SEM_CONTRATO,true],["regimes",c=>c.regime,false]].forEach(([id,fn,clicavel])=>{const b=$(id);b.replaceChildren();
   if(!dados.funcionarios){emptyRow(b,2,"A carregar colaboradores…","loading");return}
-  M.contagem(activos,fn).forEach(([k,n])=>{const tr=document.createElement("tr");cell(tr,k);cell(tr,String(n),{num:true});b.append(tr)})});
+  if(!activos.length){emptyRow(b,2,"Sem colaboradores activos.");return}
+  M.contagem(activos,fn).forEach(([k,n])=>{const tr=document.createElement("tr");cell(tr,k);cell(tr,String(n),{num:true});
+   if(clicavel){tr.title="Filtrar a lista de colaboradores por «"+k+"»";tr.classList.toggle("seleccionada",k===escolhido);tr.addEventListener("click",()=>filtrarPorContrato(k))}
+   b.append(tr)})});
 }
 function renderAdendas(){
  if(!dados.contratos)return;
@@ -277,7 +301,8 @@ function render(){ficha.actualizar();renderEmployees();renderContratos();renderA
 $("employee-search").addEventListener("input",renderEmployees);
 ["employee-filter","employee-department"].forEach(id=>$(id).addEventListener("change",renderEmployees));
 $("employee-company").addEventListener("change",()=>{$("employee-department").value="";renderEmployees()});
-$("employee-clear").addEventListener("click",()=>{["employee-search","employee-company","employee-department","employee-filter"].forEach(id=>$(id).value="");renderEmployees()});
+$("employee-contract").addEventListener("change",()=>{renderEmployees();renderContratos()});
+$("employee-clear").addEventListener("click",()=>{["employee-search","employee-company","employee-department","employee-contract","employee-filter"].forEach(id=>$(id).value="");renderEmployees();renderContratos()});
 $("pay-company").addEventListener("change",()=>{$("pay-department").value="";$("pay-employee").value="";renderSalarios()});
 $("pay-department").addEventListener("change",()=>{$("pay-employee").value="";renderSalarios()});
 $("pay-employee").addEventListener("change",renderSalarios);
@@ -322,7 +347,7 @@ function desligar(){
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
- ["employee-company","employee-department","pay-company","pay-department","pay-employee"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
+ ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
  if(ficha.aberta())document.getElementById("ficha").close();
  render();
 }
