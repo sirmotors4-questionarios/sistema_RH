@@ -31,3 +31,15 @@ test("preferências: ids desconhecidos saem, o Nome fica sempre, a estrutura pad
   assert.equal(p.ordem, null);
   assert.ok(LC.eDefault(LC.normalizar(null, cat)));
 });
+
+test("colunas do cadastro: só as que não existem na tbl_lançamento, ligadas por Empresa + Código", () => {
+  const lanc = [{Empresa: "SIR", Codigo: "0001", Nome: "A", Profissao: "X", Vencimento: "1"}, {Empresa: "SIR", Codigo: "0002", Nome: "B", Profissao: "Y", Vencimento: "2"}];
+  const func = [{Empresa: "SIR", Codigo: "1", Nome: "A", "Profissão": "X", "Data Admissao": "45000", NUIT: "123", Sexo: "F"},
+    {Empresa: "SIR", Codigo: "0002", Nome: "B", "Profissão": "Y", "Data Admissao": "44000", NUIT: "456", Sexo: "M"}];
+  const cat = LC.catalogo(lanc, func), cad = cat.filter(c => c.origem === "funcionarios");
+  assert.deepEqual(cad.map(c => [c.rotulo, c.tipo]), [["Data Admissao", "data"], ["NUIT", "numero"], ["Sexo", "texto"]]);
+  const sexo = cad.find(c => c.rotulo === "Sexo"), m = {linha: lanc[0]};
+  assert.equal(sexo.valor(m), "F"); // código 0001 ↔ 1
+  // preferência com coluna do cadastro ainda por carregar não se perde
+  assert.ok(LC.normalizar({colunas: ["nome", "f:Sexo"]}, LC.catalogo(lanc)).colunas.includes("f:Sexo"));
+});
