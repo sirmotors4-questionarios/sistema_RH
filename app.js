@@ -21,7 +21,7 @@ const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
 const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
-const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos"],salarios:["lancamentos"],ferias:["ferias"]};
+const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos"],salarios:["lancamentos","funcionarios"],ferias:["ferias"]};
 
 const dados={};          // módulo -> {tabelas, carregado}
 const pedidos={};        // módulo -> Promise em curso
@@ -285,15 +285,15 @@ function moverColuna(id,destino){const c=[...colunasLanc.colunas],i=c.indexOf(id
 function renderCabecalhoLanc(cols,cat){
  catLanc=cat;const head=$("pay-head"),o=colunasLanc.ordem;
  cabecalhoOrdenavel(head,cols,o,c=>mudarColunas({...colunasLanc,ordem:LC.proximaOrdem(colunasLanc.ordem,c.id)}),(th,c)=>{
-  const i=cols.indexOf(c);th.querySelector("button").title+=(c.extra?" · coluna adicionada":"")+" · arraste para mudar de posição";
-  if(c.extra)th.classList.add("col-extra");
+  const i=cols.indexOf(c);th.querySelector("button").title+=(c.origem==="funcionarios"?" · coluna do cadastro (tbl_funcionarios)":c.extra?" · coluna adicionada":"")+" · arraste para mudar de posição";
+  if(c.extra)th.classList.add(c.origem==="funcionarios"?"col-cadastro":"col-extra");
   // arrastar o cabeçalho para outra posição
   th.draggable=true;
   th.addEventListener("dragstart",e=>{arrastada=c.id;th.classList.add("a-arrastar");e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",c.id)}catch{}});
   th.addEventListener("dragend",()=>{arrastada=null;head.querySelectorAll("th").forEach(x=>x.classList.remove("a-arrastar","alvo"))});
   th.addEventListener("dragover",e=>{if(arrastada&&arrastada!==c.id){e.preventDefault();th.classList.add("alvo")}});
   th.addEventListener("dragleave",()=>th.classList.remove("alvo"));
-  th.addEventListener("drop",e=>{e.preventDefault();if(arrastada)moverColuna(arrastada,i)})});
+  th.addEventListener("drop",e=>{e.preventDefault();if(arrastada)moverColuna(arrastada,colunasLanc.colunas.indexOf(c.id))})});
  const oc=o&&cat.find(c=>c.id===o.id);
  $("pay-ordem").textContent=oc?"Ordenado por «"+oc.rotulo+"» "+(o.dir==="asc"?"▲ crescente":"▼ decrescente")+" · clique de novo para inverter ou retirar":"Clique num cabeçalho para ordenar · arraste-o para mudar de posição";
  $("pay-cols-reset").hidden=LC.eDefault(colunasLanc);
@@ -303,7 +303,7 @@ function renderPainelColunas(){
  const porId=new Map(catLanc.map(c=>[c.id,c])),vis=$("pay-cols-visiveis");vis.replaceChildren();
  const ids=colunasLanc.colunas;
  ids.forEach((id,i)=>{const c=porId.get(id);if(!c)return;const li=document.createElement("li");li.draggable=true;li.dataset.id=id;
-  const nome=document.createElement("span");nome.textContent=c.rotulo;if(c.extra){const s=document.createElement("small");s.textContent="adicionada";nome.append(" ",s)}
+  const nome=document.createElement("span");nome.textContent=c.rotulo;if(c.extra){const s=document.createElement("small");s.textContent=c.origem==="funcionarios"?"cadastro":"adicionada";nome.append(" ",s)}
   const btn=(txt,tit,fn,off)=>{const b=document.createElement("button");b.type="button";b.textContent=txt;b.title=tit;b.setAttribute("aria-label",tit+": "+c.rotulo);b.disabled=Boolean(off);b.addEventListener("click",fn);return b};
   li.append(nome,btn("↑","Subir",()=>moverColuna(id,i-1),i===0),btn("↓","Descer",()=>moverColuna(id,i+1),i===ids.length-1),
    btn("✕",c.fixa?"O nome não pode ser retirado":"Retirar coluna",()=>mudarColunas({colunas:ids.filter(x=>x!==id),ordem:colunasLanc.ordem?.id===id?null:colunasLanc.ordem}),c.fixa));
@@ -315,7 +315,7 @@ function renderPainelColunas(){
   vis.append(li)});
  const termo=$("pay-cols-procura").value.trim().toLocaleLowerCase("pt"),disp=$("pay-cols-disponiveis");disp.replaceChildren();
  const livres=catLanc.filter(c=>!ids.includes(c.id)&&(!termo||c.rotulo.toLocaleLowerCase("pt").includes(termo)));
- [["Da estrutura padrão",livres.filter(c=>!c.extra)],["Outras colunas do sistema (tbl_lançamento)",livres.filter(c=>c.extra)]].forEach(([titulo,lst])=>{
+ [["Da estrutura padrão",livres.filter(c=>!c.extra)],["Do lançamento (tbl_lançamento)",livres.filter(c=>c.origem==="lancamento")],["Do cadastro (tbl_funcionarios)",livres.filter(c=>c.origem==="funcionarios")]].forEach(([titulo,lst])=>{
   if(!lst.length)return;const h=document.createElement("small");h.className="cols-grupo";h.textContent=titulo;disp.append(h);
   lst.forEach(c=>{const b=document.createElement("button");b.type="button";b.className="cols-add";b.textContent="+ "+c.rotulo;
    const tp=document.createElement("small");tp.textContent=c.tipo==="numero"?"número":c.tipo==="data"?"data":"texto";b.append(tp);
@@ -347,9 +347,9 @@ function renderSalarios(){
  $("p-states").textContent=M.contagem(result,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos";
  $("p-acr").textContent=fmt(M.totais(result,"acrescimos"));$("p-desc").textContent=fmt(M.totais(result,"descontos"));$("p-liq").textContent=fmt(M.totais(result,"liquido"));
  // Colunas escolhidas pelo utilizador (estrutura padrão por omissão) e ordenação pelo cabeçalho.
- const cat=LC.catalogo(todas),porId=new Map(cat.map(c=>[c.id,c]));
+ const cat=LC.catalogo(todas,dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[]),porId=new Map(cat.map(c=>[c.id,c]));
  colunasLanc=LC.normalizar(colunasLanc,cat);
- const cols=colunasLanc.colunas.map(id=>porId.get(id));
+ const cols=colunasLanc.colunas.map(id=>porId.get(id)).filter(Boolean);
  renderCabecalhoLanc(cols,cat);
  const ordem=colunasLanc.ordem,ordenada=ordem?LC.ordenar(result,porId.get(ordem.id),ordem.dir):result;
  const body=$("pay-body");body.replaceChildren();
@@ -505,8 +505,8 @@ const lanc=iniciarLancamentos({
  lancamentosMes:()=>{const p=dados.lancamentos?.periodo;return p?doPeriodo(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes):[]},
  filtros:()=>({empresa:$("pay-company").value,departamento:$("pay-department").value,codigo:$("pay-employee").value}),
  // A folha segue a tabela: mesma ordenação e, se a estrutura foi alterada, as mesmas colunas pela mesma ordem.
- vistaTabela:()=>{const cat=LC.catalogo(linhas("lancamentos","tbl_lançamento")),porId=new Map(cat.map(c=>[c.id,c]));const p=LC.normalizar(colunasLanc,cat);
-  return {colunas:p.colunas.map(id=>porId.get(id)),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null})}},
+ vistaTabela:()=>{const cat=LC.catalogo(linhas("lancamentos","tbl_lançamento"),dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[]),porId=new Map(cat.map(c=>[c.id,c]));const p=LC.normalizar(colunasLanc,cat);
+  return {colunas:p.colunas.map(id=>porId.get(id)).filter(Boolean),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null})}},
  carregarMes,esquecerMes:(a,m)=>{meses.delete(a+"-"+m);mesesCompletos=false},
  funcionarios:()=>carregar("funcionarios").then(()=>linhas("funcionarios","tbl_funcionarios")),
  contratos:()=>carregar("contratos").then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),

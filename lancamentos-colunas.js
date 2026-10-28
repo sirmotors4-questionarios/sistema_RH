@@ -23,7 +23,7 @@ export const PADRAO = Object.freeze([
 ]);
 export const PADRAO_IDS = Object.freeze(PADRAO.map(c => c.id));
 
-const SEM_TOTAL = /^(ano|m[eê]s|c[oó]digo|n[º.o]|id\b)|taxa|%|percent|escal[aã]o|categoria/i;
+const SEM_TOTAL = /^(ano|m[eê]s|c[oó]digo|n[º.o]|id\b)|taxa|%|percent|escal[aã]o|categoria|nuit|\bbi\b|telefone|telem|contacto|nib|iban|conta|idade|c[oó]d/i;
 const chave = s => String(s).toLocaleLowerCase("pt").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\s_]/g, "");
 
 // Tipo de uma coluna do Excel, pelo nome e pelos valores: data, número ou texto.
@@ -35,23 +35,37 @@ export function tipoColuna(cabecalho, linhas) {
   return nums / vals.length >= 0.8 ? "numero" : "texto";
 }
 
-// Todas as colunas possíveis: as da estrutura padrão + as restantes colunas de tbl_lançamento.
-export function catalogo(linhasExcel = []) {
+// Todas as colunas possíveis: as da estrutura padrão + as restantes colunas de tbl_lançamento +
+// as colunas de tbl_funcionarios que NÃO existem na tbl_lançamento (as repetidas ficam só uma vez, a do lançamento).
+// As do cadastro ligam-se a cada lançamento por Empresa + Código.
+export function catalogo(linhasExcel = [], funcionarios = []) {
   const usadas = new Set(PADRAO.flatMap(c => c.fonte.map(chave)));
-  const extra = M.colunas(linhasExcel)
+  const cabLanc = M.colunas(linhasExcel);
+  const extra = cabLanc
     .filter(h => !usadas.has(chave(h)))
     .map(h => {
       const tipo = tipoColuna(h, linhasExcel);
-      return {id: "x:" + h, rotulo: h, tipo, extra: true, total: tipo === "numero" && !SEM_TOTAL.test(h), valor: l => l.linha?.[h]};
+      return {id: "x:" + h, rotulo: h, tipo, extra: true, origem: "lancamento", total: tipo === "numero" && !SEM_TOTAL.test(h), valor: l => l.linha?.[h]};
     });
-  return [...PADRAO, ...extra];
+  const noLancamento = new Set([...cabLanc, ...PADRAO.flatMap(c => c.fonte)].map(chave));
+  const porChave = new Map(funcionarios.map(f => [M.chaveRH(M.campo(f, "Empresa"), M.campo(f, "Codigo", "Código")), f]));
+  const ficha = l => porChave.get(M.chaveRH(M.campo(l.linha, "Empresa"), M.campo(l.linha, "Codigo", "Código")));
+  const doCadastro = M.colunas(funcionarios)
+    .filter(h => !noLancamento.has(chave(h)))
+    .map(h => {
+      const tipo = tipoColuna(h, funcionarios);
+      return {id: "f:" + h, rotulo: h, tipo, extra: true, origem: "funcionarios", total: tipo === "numero" && !SEM_TOTAL.test(h), valor: l => ficha(l)?.[h]};
+    });
+  return [...PADRAO, ...extra, ...doCadastro];
 }
 
 // Preferências: {colunas: [ids por ordem], ordem: {id, dir: "asc"|"desc"} | null}. Ids desconhecidos são ignorados;
 // o Nome nunca sai (identifica a linha e mostra o estado da gravação).
 export function normalizar(pref, cat) {
   const ids = new Set(cat.map(c => c.id));
-  let cols = Array.isArray(pref?.colunas) ? pref.colunas.filter((id, i, a) => ids.has(id) && a.indexOf(id) === i) : [...PADRAO_IDS];
+  // Colunas extra ainda não carregadas (ex.: cadastro a carregar) mantêm-se na preferência; só não aparecem.
+  const conhecida = id => ids.has(id) || /^[xf]:/.test(id);
+  let cols = Array.isArray(pref?.colunas) ? pref.colunas.filter((id, i, a) => typeof id === "string" && conhecida(id) && a.indexOf(id) === i) : [...PADRAO_IDS];
   if (!cols.includes("nome")) cols.splice(Math.min(1, cols.length), 0, "nome");
   const o = pref?.ordem;
   const ordem = o && cols.includes(o.id) && (o.dir === "asc" || o.dir === "desc") ? {id: o.id, dir: o.dir} : null;

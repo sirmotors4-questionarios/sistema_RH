@@ -229,3 +229,4 @@ th.num .th-ordem{flex-direction:row-reverse}
 .wide-table th.col-extra{background:#fdf6f7}
 .wide-table th[draggable=true]{cursor:grab}
 .rel-nota{font-size:12px;color:#7a1220;background:#fdf6f7;border-left:3px solid #be2537;padding:8px 12px;border-radius:6px;margin:0 0 12px}
+.wide-table th.col-cadastro{background:#f2f6fa}
