@@ -1,9 +1,10 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
 import {iniciarRelatorios} from "./relatorios-ui.js";
+import {iniciarIndemnizacoes} from "./indemnizacoes-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
 import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes} from "./rh-api.js";
-import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
+import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
@@ -19,9 +20,9 @@ const mockEmployees = [
 ];
 const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
-const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",relatorios:"Relatórios",configuracoes:"Configurações"};
+const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",indemnizacoes:"Indemnizações",relatorios:"Relatórios",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
-const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos"],salarios:["lancamentos","funcionarios"],ferias:["ferias"]};
+const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos"],salarios:["lancamentos","funcionarios"],ferias:["ferias"],indemnizacoes:["funcionarios"]};
 
 const dados={};          // módulo -> {tabelas, carregado}
 const pedidos={};        // módulo -> Promise em curso
@@ -41,6 +42,7 @@ function go(page,foco){
  if(ligado)(precisa[page]||[]).forEach(m=>carregar(m));
  if(page==="painel")painel.abrir();
  if(page==="relatorios")relatorios.abrir();
+ if(page==="indemnizacoes")indemn.abrir();
 }
 document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go,el.dataset.foco)));
@@ -436,9 +438,10 @@ function ligar(quem,via){
  (precisa[paginaActual]||[]).forEach(m=>carregar(m));
  if(paginaActual==="painel")painel.abrir();
  if(paginaActual==="relatorios")relatorios.abrir();
+ if(paginaActual==="indemnizacoes")indemn.abrir();
 }
 function desligar(){
- painel.limpar();relatorios.limpar();
+ painel.limpar();relatorios.limpar();indemn.limpar();
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
@@ -533,6 +536,17 @@ const relatorios=iniciarRelatorios({
  carregarMes:(ano,mes)=>carregarMes(ano,mes),
  periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null),
  utilizador:()=>utilizadorActual?.nome||sessaoAcesso()?.email||"",
+ aviso:showToast
+});
+// ---------- Indemnizações (fluxo próprio RH_API_Indemnizacoes) ----------
+const indemn=iniciarIndemnizacoes({
+ ligado:()=>ligado,
+ temUrl:()=>Boolean(sessaoAcesso()&&urlIndemnizacoes()),
+ guardarUrl:url=>guardarUrlIndemnizacoes(url),
+ transporte:()=>({credenciais:sessaoAcesso(),url:urlIndemnizacoes()}),
+ funcionarios:()=>dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[],
+ podeGravar,
+ utilizador:()=>sessaoAcesso()?.email||"",
  aviso:showToast
 });
 $("btn-preview").addEventListener("click",()=>lanc.preVisualizar());

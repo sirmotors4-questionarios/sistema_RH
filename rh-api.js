@@ -142,3 +142,26 @@ export async function finalizarMes({ano, mes, mesNome, utilizador = '', agoraSer
     linhas: [{'Utilizador Alteracao': utilizador, 'Data Ultima Alteracao': agoraSerie}]}});
   return {alteradas: Number(body.alteradas) || 0};
 }
+
+// ---------- Indemnizações (fluxo RH_API_Indemnizacoes → Office Script RHIndemnizacoes) ----------
+// O script devolve sempre texto JSON; o fluxo responde {ok, resultado: "<json>"} ou já com o objecto.
+function resultadoScript(body) {
+  let r = body?.resultado ?? body;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch { throw new ApiError('Resposta do script inválida.', 200, 'RH_RESPONSE'); } }
+  if (!r || r.ok !== true) throw new ApiError(r?.erro || 'O Excel recusou o pedido.', 409, 'RH_CONFLITO');
+  return r;
+}
+const listaJson = v => { if (Array.isArray(v)) return v; try { const x = JSON.parse(v || '[]'); return Array.isArray(x) ? x : []; } catch { return []; } };
+export async function indemnizacoesListar(deps = {}) {
+  const r = resultadoScript(await callApi('indemnizacoes_listar', deps));
+  return {indemnizacoes: listaJson(r.indemnizacoes), prestacoes: listaJson(r.prestacoes)};
+}
+export async function indemnizacaoGravar(pedido, deps = {}) {
+  return resultadoScript(await callApi('indemnizacao_gravar', {...deps, params: {dados: JSON.stringify(pedido)}}));
+}
+export async function prestacaoPagar({id, paga = true, data = ''}, deps = {}) {
+  return resultadoScript(await callApi('prestacao_pagar', {...deps, params: {dados: JSON.stringify({id, paga, data})}}));
+}
+export async function indemnizacaoAnular({id, observacoes = ''}, deps = {}) {
+  return resultadoScript(await callApi('indemnizacao_anular', {...deps, params: {dados: JSON.stringify({id, observacoes})}}));
+}
