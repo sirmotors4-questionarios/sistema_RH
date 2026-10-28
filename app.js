@@ -1,5 +1,6 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
 import {iniciarRelatorios} from "./relatorios-ui.js";
+import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
 import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
@@ -192,6 +193,26 @@ function cascata(lista,selEmp,selDep){
  const o=M.opcoesFiltro(lista,selEmp.value);
  fillSelect(selEmp,o.empresas,"Todas");fillSelect(selDep,o.departamentos,"Todos");
 }
+// ---------- ordenação da tabela de colaboradores ----------
+const COLS_COLAB=[{id:"codigo",rotulo:"Código",tipo:"texto",valor:e=>e.codigo},{id:"nome",rotulo:"Nome",tipo:"texto",valor:e=>e.nome},
+ {id:"empresa",rotulo:"Empresa",tipo:"texto",valor:e=>e.empresa},{id:"departamento",rotulo:"Departamento",tipo:"texto",valor:e=>e.departamento},
+ {id:"profissao",rotulo:"Profissão",tipo:"texto",valor:e=>e.profissao},{id:"contrato",rotulo:"Contrato",tipo:"texto",valor:e=>e.contrato},
+ {id:"regime",rotulo:"Regime",tipo:"texto",valor:e=>e.regime},{id:"estado",rotulo:"Estado",tipo:"texto",valor:e=>e.estado}];
+const CHAVE_ORDEM_COLAB="sirRH.colaboradores.ordem.v1";
+let ordemColab=(()=>{try{const o=JSON.parse(localStorage.getItem(CHAVE_ORDEM_COLAB)||"null");return o&&COLS_COLAB.some(c=>c.id===o.id)&&/^(asc|desc)$/.test(o.dir)?o:null}catch{return null}})();
+// Cabeçalho com ordenação: crescente → decrescente → ordem original. O texto da dica depende do tipo da coluna.
+function cabecalhoOrdenavel(head,cols,ordem,aoClicar,extra){
+ head.replaceChildren();
+ cols.forEach(c=>{const th=document.createElement("th");if(c.tipo==="numero")th.className="num";
+  const dir=ordem&&ordem.id===c.id?ordem.dir:"";
+  const tipoTxt=c.tipo==="numero"?(dir==="asc"?"do menor para o maior":"do maior para o menor"):c.tipo==="data"?(dir==="asc"?"da mais antiga para a mais recente":"da mais recente para a mais antiga"):(dir==="asc"?"de A a Z":"de Z a A");
+  th.setAttribute("aria-sort",dir==="asc"?"ascending":dir==="desc"?"descending":"none");
+  const b=document.createElement("button");b.type="button";b.className="th-ordem";b.title=(dir?"Ordenado "+tipoTxt+". ":"")+"Clique para ordenar";
+  const t=document.createElement("span");t.textContent=c.rotulo;const seta=document.createElement("i");seta.className="seta"+(dir?" activa":"");seta.textContent=dir==="asc"?"▲":dir==="desc"?"▼":"↕";
+  b.append(t,seta);b.addEventListener("click",()=>aoClicar(c));th.append(b);
+  if(extra)extra(th,c);
+  head.append(th)});
+}
 function renderEmployees(){
  const lista=dados.funcionarios?M.colaboradores(linhas("funcionarios","tbl_funcionarios")):mockEmployees;
  const emp=$("employee-company"),dep=$("employee-department"),filtro=$("employee-filter"),ctr=$("employee-contract");
@@ -199,9 +220,12 @@ function renderEmployees(){
  opcoesContrato(lista,ctr);
  const result=M.filtrarColaboradores(lista,$("employee-search").value,filtro.value,{empresa:emp.value,departamento:dep.value})
   .filter(e=>!ctr.value||(e.contrato||SEM_CONTRATO)===ctr.value);
+ cabecalhoOrdenavel($("employees-head"),COLS_COLAB,ordemColab,c=>{ordemColab=LC.proximaOrdem(ordemColab,c.id);try{localStorage.setItem(CHAVE_ORDEM_COLAB,JSON.stringify(ordemColab))}catch{}renderEmployees()});
+ $("employees-head").append(document.createElement("th"));
+ const ordenados=ordemColab?LC.ordenar(result,COLS_COLAB.find(c=>c.id===ordemColab.id),ordemColab.dir):result;
  const tbody=$("employees-body");tbody.replaceChildren();
  if(!result.length)emptyRow(tbody,9,"Nenhum colaborador corresponde aos filtros.");
- result.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.profissao);cell(tr,e.contrato||"—");cell(tr,e.regime);stateCell(tr,e.estado);
+ ordenados.slice(0,MAX_LINHAS).forEach(e=>{const tr=document.createElement("tr");cell(tr,e.codigo);cell(tr,e.nome,{strong:true});cell(tr,e.empresa);cell(tr,e.departamento);cell(tr,e.profissao);cell(tr,e.contrato||"—");cell(tr,e.regime);stateCell(tr,e.estado);
   const td=document.createElement("td"),btn=document.createElement("button");btn.type="button";btn.className="inline-btn";btn.textContent="Abrir ficha";btn.setAttribute("aria-label","Abrir ficha de "+e.nome+" ("+e.codigo+" · "+e.empresa+")");
   const abrir=()=>{if(!e.linha){showToast("Ficha disponível depois de entrar com o código de acesso.");return}ficha.ver(e.linha)};
   btn.addEventListener("click",ev=>{ev.stopPropagation();abrir()});tr.addEventListener("click",abrir);td.append(btn);tr.append(td);tbody.append(tr)});
@@ -254,6 +278,60 @@ function renderAdendas(){
  result.slice(0,MAX_LINHAS).forEach(a=>{const tr=document.createElement("tr");cell(tr,a.numero||a.id);cell(tr,[a.codigo,a.nome].filter(Boolean).join(" · "),{strong:true});cell(tr,a.campo);cell(tr,a.anterior);cell(tr,a.novo);cell(tr,M.formatarData(a.inicio));cell(tr,a.fim?M.formatarData(a.fim):"—");cell(tr,a.estado);cell(tr,a.aplicada);body.append(tr)});
  $("addenda-count").textContent=result.length+" de "+lista.length+" adenda(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"");
 }
+// ---------- colunas da tabela de lançamentos ----------
+let colunasLanc=LC.normalizar(LC.lerPreferencias(),[...LC.PADRAO]),catLanc=[...LC.PADRAO],arrastada=null;
+function mudarColunas(novo){colunasLanc=novo;LC.guardarPreferencias(colunasLanc);renderSalarios();renderPainelColunas()}
+function moverColuna(id,destino){const c=[...colunasLanc.colunas],i=c.indexOf(id);if(i<0||destino<0||destino>=c.length||i===destino)return;c.splice(i,1);c.splice(destino,0,id);mudarColunas({...colunasLanc,colunas:c})}
+function renderCabecalhoLanc(cols,cat){
+ catLanc=cat;const head=$("pay-head"),o=colunasLanc.ordem;
+ cabecalhoOrdenavel(head,cols,o,c=>mudarColunas({...colunasLanc,ordem:LC.proximaOrdem(colunasLanc.ordem,c.id)}),(th,c)=>{
+  const i=cols.indexOf(c);th.querySelector("button").title+=(c.extra?" · coluna adicionada":"")+" · arraste para mudar de posição";
+  if(c.extra)th.classList.add("col-extra");
+  // arrastar o cabeçalho para outra posição
+  th.draggable=true;
+  th.addEventListener("dragstart",e=>{arrastada=c.id;th.classList.add("a-arrastar");e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",c.id)}catch{}});
+  th.addEventListener("dragend",()=>{arrastada=null;head.querySelectorAll("th").forEach(x=>x.classList.remove("a-arrastar","alvo"))});
+  th.addEventListener("dragover",e=>{if(arrastada&&arrastada!==c.id){e.preventDefault();th.classList.add("alvo")}});
+  th.addEventListener("dragleave",()=>th.classList.remove("alvo"));
+  th.addEventListener("drop",e=>{e.preventDefault();if(arrastada)moverColuna(arrastada,i)})});
+ const oc=o&&cat.find(c=>c.id===o.id);
+ $("pay-ordem").textContent=oc?"Ordenado por «"+oc.rotulo+"» "+(o.dir==="asc"?"▲ crescente":"▼ decrescente")+" · clique de novo para inverter ou retirar":"Clique num cabeçalho para ordenar · arraste-o para mudar de posição";
+ $("pay-cols-reset").hidden=LC.eDefault(colunasLanc);
+}
+function renderPainelColunas(){
+ if($("pay-cols").hidden)return;
+ const porId=new Map(catLanc.map(c=>[c.id,c])),vis=$("pay-cols-visiveis");vis.replaceChildren();
+ const ids=colunasLanc.colunas;
+ ids.forEach((id,i)=>{const c=porId.get(id);if(!c)return;const li=document.createElement("li");li.draggable=true;li.dataset.id=id;
+  const nome=document.createElement("span");nome.textContent=c.rotulo;if(c.extra){const s=document.createElement("small");s.textContent="adicionada";nome.append(" ",s)}
+  const btn=(txt,tit,fn,off)=>{const b=document.createElement("button");b.type="button";b.textContent=txt;b.title=tit;b.setAttribute("aria-label",tit+": "+c.rotulo);b.disabled=Boolean(off);b.addEventListener("click",fn);return b};
+  li.append(nome,btn("↑","Subir",()=>moverColuna(id,i-1),i===0),btn("↓","Descer",()=>moverColuna(id,i+1),i===ids.length-1),
+   btn("✕",c.fixa?"O nome não pode ser retirado":"Retirar coluna",()=>mudarColunas({colunas:ids.filter(x=>x!==id),ordem:colunasLanc.ordem?.id===id?null:colunasLanc.ordem}),c.fixa));
+  li.addEventListener("dragstart",e=>{arrastada=id;li.classList.add("a-arrastar");try{e.dataTransfer.setData("text/plain",id)}catch{}});
+  li.addEventListener("dragend",()=>{arrastada=null;li.classList.remove("a-arrastar")});
+  li.addEventListener("dragover",e=>{if(arrastada&&arrastada!==id){e.preventDefault();li.classList.add("alvo")}});
+  li.addEventListener("dragleave",()=>li.classList.remove("alvo"));
+  li.addEventListener("drop",e=>{e.preventDefault();li.classList.remove("alvo");if(arrastada)moverColuna(arrastada,i)});
+  vis.append(li)});
+ const termo=$("pay-cols-procura").value.trim().toLocaleLowerCase("pt"),disp=$("pay-cols-disponiveis");disp.replaceChildren();
+ const livres=catLanc.filter(c=>!ids.includes(c.id)&&(!termo||c.rotulo.toLocaleLowerCase("pt").includes(termo)));
+ [["Da estrutura padrão",livres.filter(c=>!c.extra)],["Outras colunas do sistema (tbl_lançamento)",livres.filter(c=>c.extra)]].forEach(([titulo,lst])=>{
+  if(!lst.length)return;const h=document.createElement("small");h.className="cols-grupo";h.textContent=titulo;disp.append(h);
+  lst.forEach(c=>{const b=document.createElement("button");b.type="button";b.className="cols-add";b.textContent="+ "+c.rotulo;
+   const tp=document.createElement("small");tp.textContent=c.tipo==="numero"?"número":c.tipo==="data"?"data":"texto";b.append(tp);
+   // colunas da estrutura padrão voltam à sua posição de origem; as outras entram no fim
+   b.addEventListener("click",()=>{const novo=[...ids];if(c.extra)novo.push(c.id);else{const pos=LC.PADRAO_IDS.indexOf(c.id);let j=novo.findIndex(x=>LC.PADRAO_IDS.includes(x)&&LC.PADRAO_IDS.indexOf(x)>pos);if(j<0)j=novo.length;novo.splice(j,0,c.id)}mudarColunas({...colunasLanc,colunas:novo})});
+   disp.append(b)})});
+ if(!disp.children.length){const p=document.createElement("small");p.className="cols-grupo";p.textContent=catLanc.length?"Todas as colunas já estão na tabela.":"Carregue um mês para ver as colunas do sistema.";disp.append(p)}
+}
+function abrirPainelColunas(abrir){const p=$("pay-cols");p.hidden=!abrir;$("pay-cols-btn").setAttribute("aria-expanded",String(abrir));if(abrir){renderPainelColunas();$("pay-cols-procura").focus()}}
+$("pay-cols-btn").addEventListener("click",e=>{e.stopPropagation();abrirPainelColunas($("pay-cols").hidden)});
+$("pay-cols-fechar").addEventListener("click",()=>abrirPainelColunas(false));
+$("pay-cols-procura").addEventListener("input",renderPainelColunas);
+const reporColunas=()=>{mudarColunas({colunas:[...LC.PADRAO_IDS],ordem:null});showToast("Tabela reposta na estrutura padrão.")};
+$("pay-cols-padrao").addEventListener("click",reporColunas);$("pay-cols-reset").addEventListener("click",reporColunas);
+document.addEventListener("click",e=>{const p=$("pay-cols");if(!p.hidden&&!p.contains(e.target)&&e.target!==$("pay-cols-btn"))abrirPainelColunas(false)});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("pay-cols").hidden)abrirPainelColunas(false)});
 function renderSalarios(){
  if(!dados.lancamentos)return;
  const todas=linhas("lancamentos","tbl_lançamento");
@@ -268,12 +346,29 @@ function renderSalarios(){
  $("p-count").textContent=String(result.length);
  $("p-states").textContent=M.contagem(result,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos";
  $("p-acr").textContent=fmt(M.totais(result,"acrescimos"));$("p-desc").textContent=fmt(M.totais(result,"descontos"));$("p-liq").textContent=fmt(M.totais(result,"liquido"));
+ // Colunas escolhidas pelo utilizador (estrutura padrão por omissão) e ordenação pelo cabeçalho.
+ const cat=LC.catalogo(todas),porId=new Map(cat.map(c=>[c.id,c]));
+ colunasLanc=LC.normalizar(colunasLanc,cat);
+ const cols=colunasLanc.colunas.map(id=>porId.get(id));
+ renderCabecalhoLanc(cols,cat);
+ const ordem=colunasLanc.ordem,ordenada=ordem?LC.ordenar(result,porId.get(ordem.id),ordem.dir):result;
  const body=$("pay-body");body.replaceChildren();
- if(!result.length)emptyRow(body,13,lista.length?"Nenhum lançamento corresponde aos filtros.":"Sem lançamentos para este mês.");
- const v=x=>M.formatarValor(x);
- result.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");cell(tr,l.codigo);cell(tr,l.nome,{strong:true});cell(tr,l.empresa);cell(tr,l.departamento);cell(tr,l.regime);cell(tr,v(l.dias).replace(/,00$/,""),{num:true});cell(tr,v(l.base),{num:true});cell(tr,v(l.acrescimos),{num:true});cell(tr,v(l.descontos),{num:true});cell(tr,v(l.inssColab),{num:true});cell(tr,v(l.irps),{num:true});cell(tr,v(l.liquido),{num:true,strong:true});stateCell(tr,l.estado);tr.lastChild.firstChild.classList.toggle("off",!/finaliz/i.test(l.estado));const pk=per.ano+"-"+per.mes+"|"+M.chaveRH(M.campo(l.linha,"Empresa"),M.campo(l.linha,"Codigo")),pp=pendentes.get(pk);if(pp){const cls=pp.erro?"erro":pp.fim?"feito":"gravando";const b=tr.lastChild.firstChild;b.dataset.pendente=pk;b.textContent=rotuloPendente(pp);b.classList.add(cls);const n=document.createElement("small");n.className="pend state "+cls;n.dataset.pendente=pk;n.textContent=rotuloPendente(pp);tr.children[1].append(n);tr.classList.add("linha-"+cls);if(pp.erro){b.title=pp.erro;n.title=pp.erro}}tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>gravacaoActiva(pk)?showToast("Este lançamento ainda está a ser gravado ("+segs(Date.now()-pp.inicio)+" s)."):lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
+ if(!result.length)emptyRow(body,cols.length,lista.length?"Nenhum lançamento corresponde aos filtros.":"Sem lançamentos para este mês.");
+ ordenada.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");let tdNome=null,badge=null;
+  cols.forEach(c=>{
+   if(c.tipo==="estado"){stateCell(tr,l.estado);badge=tr.lastChild.firstChild;badge.classList.toggle("off",!/finaliz/i.test(l.estado));return}
+   cell(tr,LC.formatar(c,l),{num:c.tipo==="numero",strong:c.id==="nome"||c.destaque});if(c.id==="nome")tdNome=tr.lastChild});
+  const pk=per.ano+"-"+per.mes+"|"+M.chaveRH(M.campo(l.linha,"Empresa"),M.campo(l.linha,"Codigo")),pp=pendentes.get(pk);
+  if(pp){const cls=pp.erro?"erro":pp.fim?"feito":"gravando";
+   if(badge){badge.dataset.pendente=pk;badge.textContent=rotuloPendente(pp);badge.classList.add(cls);if(pp.erro)badge.title=pp.erro}
+   if(tdNome){const n=document.createElement("small");n.className="pend state "+cls;n.dataset.pendente=pk;n.textContent=rotuloPendente(pp);if(pp.erro)n.title=pp.erro;tdNome.append(n)}
+   tr.classList.add("linha-"+cls)}
+  tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>gravacaoActiva(pk)?showToast("Este lançamento ainda está a ser gravado ("+segs(Date.now()-pp.inicio)+" s)."):lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
  const foot=$("pay-foot");foot.replaceChildren();
- if(result.length){const tr=document.createElement("tr");cell(tr,"Totais",{strong:true});["","","","",""].forEach(()=>cell(tr,""));["base","acrescimos","descontos","inssColab","irps","liquido"].forEach(k=>cell(tr,fmt(M.totais(result,k)),{num:true,strong:true}));cell(tr,"");foot.append(tr)}
+ if(result.length){const tr=document.createElement("tr");let rotulo=false;
+  cols.forEach(c=>{if(c.tipo==="numero"&&c.total){cell(tr,fmt(LC.somar(result,c)),{num:true,strong:true});return}
+   cell(tr,rotulo?"":"Totais",{strong:true});rotulo=true});
+  foot.append(tr)}
  $("pay-count").textContent=result.length+" de "+lista.length+" lançamento(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"")+" · INSS empresa: "+fmt(M.totais(result,"inssEmpresa"))+" MT";
 }
 function renderFerias(){
