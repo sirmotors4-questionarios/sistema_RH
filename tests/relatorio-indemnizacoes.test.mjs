@@ -23,3 +23,15 @@ test("relatório de indemnizações: totais, mês, atraso e anulados fora", () =
   assert.ok(r.secoes.some(s => /em atraso/.test(s.titulo)));
   assert.equal(relatorioIndemnizacoes({indemnizacoes: [], prestacoes: [], ano: 2026, mes: 10}).vazio.length > 0, true);
 });
+
+import {relatorioEvolucao} from "../relatorios-dados.js";
+test("custos com pessoal incluem indemnizações pagas no mês do pagamento", () => {
+  const lanc = [{Empresa: "SIR Motors", Codigo: "0003", Nome: "Eva", Ano: "2026", "Mês": "Setembro", "Vencimento Base": "10000", Vencimento: "10000", "INSS Empresa": "400", "Salario Liquido": "9000", "Estado do Lançamento": "Finalizado"}];
+  const r = relatorioEvolucao({lancPorMes: [{ano: 2026, mes: 9, linhas: lanc}], indemnizacoes: ind, prestacoes: pre});
+  const sec = r.secoes.find(s => /Evolução mensal/.test(s.titulo));
+  assert.equal(sec.tabela.linhas[0][5].replace(/\s/g, "."), "40.000,00");
+  const k = Object.fromEntries(r.kpis.map(x => [x.rotulo, x.valor]));
+  assert.match(k["Indemnizações pagas"], /^40.000,00/);
+  const sem = relatorioEvolucao({lancPorMes: [{ano: 2026, mes: 9, linhas: lanc}]});
+  assert.match(Object.fromEntries(sem.kpis.map(x => [x.rotulo, x.nota]))["Indemnizações pagas"], /não lidas/);
+});

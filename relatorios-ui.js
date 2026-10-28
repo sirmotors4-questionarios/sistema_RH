@@ -279,6 +279,11 @@ export function iniciarRelatorios(ctx) {
     if (c.precisa.includes("mes")) { estado("A ler os lançamentos de " + M.NOME_MES[mes - 1] + " " + ano + "…"); base.lancMes = await ctx.carregarMes(ano, mes); }
     if (c.precisa.includes("anterior")) { const a = mes === 1 ? {ano: ano - 1, mes: 12} : {ano, mes: mes - 1}; base.lancAnterior = await ctx.carregarMes(a.ano, a.mes).catch(() => []); }
     if (c.precisa.includes("cadastro")) { estado("A ler o cadastro…"); base.funcionarios = await ctx.funcionarios(); }
+    if (c.precisa.includes("indemnizacoes_opcional") && ctx.indemnizacoes) {
+      estado("A ler as indemnizações…");
+      const d = await ctx.indemnizacoes().catch(() => null);
+      if (d) { base.indemnizacoes = d.indemnizacoes; base.prestacoes = d.prestacoes; }
+    }
     if (c.precisa.includes("indemnizacoes")) {
       estado("A ler as indemnizações…");
       const d = ctx.indemnizacoes ? await ctx.indemnizacoes() : null;

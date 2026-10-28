@@ -252,8 +252,9 @@ def carregar_indemnizacoes(versao):
         pre["limite"] = pre.get("Data Limite", pd.Series([None] * len(pre))).map(data)
         pre["pago_em"] = pre.get("Data Pagamento", pd.Series([None] * len(pre))).map(data)
         pre["paga"] = pre.get("Estado", "").fillna("").astype(str).str.strip().str.lower().eq("paga")
-        pre = pre.join(ind.set_index("ID_Indemnizacao")[["Empresa", "Departamento", "Nome"]], on="ID_Indemnizacao", rsuffix="_ind")
-        pre["Nome"] = pre["Nome_ind"].fillna(pre.get("Nome", "")) if "Nome_ind" in pre else pre.get("Nome", "")
+        # Empresa, departamento, nome e código vêm sempre do plano (a prestação pode não os ter preenchidos)
+        pre = pre.drop(columns=[c for c in ("Empresa", "Departamento", "Nome", "Codigo") if c in pre])
+        pre = pre.join(ind.set_index("ID_Indemnizacao")[["Empresa", "Departamento", "Nome", "Codigo"]], on="ID_Indemnizacao")
     return ind, pre
 
 
@@ -341,6 +342,35 @@ L_todos = filtrar(lanc, periodo=False)  # tendências: todos os meses carregados
 L = filtrar(lanc)                       # período seleccionado
 F = filtrar(func)
 F_act = F[F["activo"]] if not F.empty else F
+
+# Indemnizações pagas = custo do capital humano no mês do pagamento (Data Pagamento; sem ela, a data limite).
+TEM_IND = bool(meta.get("indemnizacoes"))
+IND, PRE = carregar_indemnizacoes(versao_f.read_text() if versao_f.exists() else "0") if TEM_IND else (pd.DataFrame(), pd.DataFrame())
+
+
+def pagamentos_indemnizacao():
+    if PRE.empty or "paga" not in PRE:
+        return pd.DataFrame(columns=["Valor", "ano", "mes", "periodo", "Período", "Empresa", "Departamento", "chave"])
+    p = PRE[PRE["paga"]].copy()
+    p["quando"] = p["pago_em"].fillna(p["limite"])
+    p = p.dropna(subset=["quando"])
+    p["ano"], p["mes"] = p["quando"].dt.year.astype(int), p["quando"].dt.month.astype(int)
+    p["periodo"] = pd.to_datetime(dict(year=p["ano"], month=p["mes"], day=1))
+    p["Período"] = [f"{MESES_CURTOS[m - 1]} {a}" for a, m in zip(p["ano"], p["mes"])]
+    p["chave"] = [chave(e, c) for e, c in zip(p.get("Empresa", ""), p.get("Codigo", ""))]
+    if not func.empty:  # perfil do cadastro, para os filtros de sexo, contrato, regime e estado também se aplicarem
+        perfil = func.drop_duplicates("chave").set_index("chave")[["Sexo", "TipoContrato", "RegimePagamento", "Situação"]]
+        p = p.join(perfil, on="chave")
+    return p
+
+
+PAG = pagamentos_indemnizacao()
+PAG_todos = filtrar(PAG, periodo=False)
+if not PAG_todos.empty and not L_todos.empty:
+    PAG_todos = PAG_todos[PAG_todos["periodo"] >= L_todos["periodo"].min()]  # mesmos meses do gráfico de evolução
+PAG_P = filtrar(PAG)
+if not PAG_P.empty and not L_todos.empty and ano_sel == "Todos" and mes_sel == "Todos":
+    PAG_P = PAG_P[PAG_P["periodo"] >= L_todos["periodo"].min()]
 def mes_referencia():
     """Mês para massa salarial, salário médio e variação: o seleccionado ou, sem mês, o último com dados."""
     if L_todos.empty:
@@ -426,21 +456,35 @@ def por_mes(df, cols):
 # ================================================================ 1. Custo do Capital Humano
 if escolha == "Custo do Capital Humano":
     st.title("Custo do Capital Humano")
-    st.caption(f"Período: {rotulo_periodo}. Custo empresa = Vencimento + INSS a cargo da empresa.")
+    st.caption(f"Período: {rotulo_periodo}. Custo total = Vencimento + INSS a cargo da empresa + indemnizações pagas no período."
+               + ("" if TEM_IND else " (Indemnizações ainda não lidas: abra a página Indemnizações do Sistema RH e actualize o dashboard.)"))
     if L.empty:
         sem_dados()
         st.stop()
     pessoas = L["chave"].nunique()
-    custo = L["Custo empresa"].sum()
+    custo = L["Custo empresa"].sum()  # custo salarial
+    ind_pago = PAG_P["Valor"].sum() if not PAG_P.empty else 0.0
+    custo_total = custo + ind_pago
     kpis([
-        ("Custo total empresa", mt_curto(custo), f"{n_meses} mês(es)"),
+        ("Custo total empresa", mt_curto(custo_total), f"{n_meses} mês(es)" + (f" · inclui {mt_curto(ind_pago)} de indemnizações" if ind_pago else "")),
         ("Massa salarial (vencimento)", mt_curto(L["Vencimento"].sum()), "bruto"),
         ("Salário líquido pago", mt_curto(L["Salario Liquido"].sum()), "a transferir"),
         ("INSS total", mt_curto(L["INSS Colaborador"].sum() + L["INSS Empresa"].sum()),
          f"colab. {mt(L['INSS Colaborador'].sum())} · emp. {mt(L['INSS Empresa'].sum())}"),
         ("IRPS retido", mt_curto(L["IRPS"].sum()), pct(L["IRPS"].sum() / L["Vencimento"].sum() * 100) + " do vencimento" if L["Vencimento"].sum() else ""),
-        ("Custo médio / colaborador", mt(custo / pessoas / n_meses if pessoas else 0), f"por mês · {inteiro(pessoas)} colaboradores"),
+        ("Custo médio / colaborador", mt(custo / pessoas / n_meses if pessoas else 0), f"por mês · {inteiro(pessoas)} colaboradores (salarial)"),
     ])
+    if TEM_IND:
+        saldo_ind = (IND["Valor Total"].sum() - PRE.loc[PRE["paga"], "Valor"].sum()) if not IND.empty and not PRE.empty else (IND["Valor Total"].sum() if not IND.empty else 0.0)
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        kpis([
+            ("Custo salarial", mt_curto(custo), "vencimento + INSS empresa"),
+            ("Indemnizações pagas", mt_curto(ind_pago), f"{inteiro(len(PAG_P))} prestação(ões) no período"),
+            ("Peso das indemnizações", pct(ind_pago / custo_total * 100) if custo_total else "—", "no custo total do período"),
+            ("Indemnizações por pagar", mt_curto(saldo_ind), "responsabilidade futura (todas as empresas)"),
+            ("Colaboradores indemnizados", inteiro(PAG_P["chave"].nunique() if not PAG_P.empty else 0), "com pagamentos no período"),
+            ("Custo total / mês", mt_curto(custo_total / n_meses), "média do período"),
+        ])
     # Indicadores do dashboard VBA: massa salarial, salário médio e variação face ao mês anterior
     if REF:
         a, m_ = REF
@@ -463,27 +507,41 @@ if escolha == "Custo do Capital Humano":
     m = por_mes(L_todos, ["Salario Liquido", "IRPS", "INSS Colaborador", "INSS Empresa", "Total de Descontos", "Custo empresa"])
     if not m.empty:
         m["Outros descontos"] = (m["Total de Descontos"] - m["IRPS"] - m["INSS Colaborador"]).clip(lower=0)
-        long = m.melt(id_vars=["periodo", "Período"], value_vars=["Salario Liquido", "IRPS", "INSS Colaborador", "Outros descontos", "INSS Empresa"],
-                      var_name="Componente", value_name="MT")
+        ind_mes = PAG_todos.groupby("periodo")["Valor"].sum() if not PAG_todos.empty else pd.Series(dtype=float)
+        m["Indemnizações"] = m["periodo"].map(ind_mes).fillna(0.0)
+        m["Custo total"] = m["Custo empresa"] + m["Indemnizações"]
+        comps = ["Salario Liquido", "IRPS", "INSS Colaborador", "Outros descontos", "INSS Empresa"] + (["Indemnizações"] if m["Indemnizações"].sum() else [])
+        long = m.melt(id_vars=["periodo", "Período"], value_vars=comps, var_name="Componente", value_name="MT")
         long["Componente"] = long["Componente"].replace({"Salario Liquido": "Salário líquido", "INSS Colaborador": "INSS colaborador", "INSS Empresa": "INSS empresa"})
         fig = px.bar(long, x="Período", y="MT", color="Componente", title="Evolução mensal do custo (todos os meses carregados)",
-                     color_discrete_sequence=["#7a1220", VERMELHO, "#efb0b6", "#f7d9dc", "#e27f89"])
-        fig.add_trace(go.Scatter(x=m["Período"], y=m["Custo empresa"], mode="lines+markers", name="Custo empresa", line=dict(color="#3d0810", width=2)))
+                     color_discrete_sequence=["#7a1220", VERMELHO, "#efb0b6", "#f7d9dc", "#e27f89", "#5c0d18"])
+        fig.add_trace(go.Scatter(x=m["Período"], y=m["Custo total"], mode="lines+markers", name="Custo total", line=dict(color="#3d0810", width=2)))
         grafico(fig, 400)
 
     c1, c2 = st.columns(2)
     with c1:
-        e = L.groupby("Empresa", as_index=False)[["Custo empresa", "Salario Liquido", "IRPS", "INSS Empresa"]].sum().sort_values("Custo empresa")
-        grafico(px.bar(e, x="Custo empresa", y="Empresa", orientation="h", title="Custo por empresa", text_auto=".3s",
-                       color_discrete_sequence=[VERMELHO]), max(300, 40 * len(e) + 100), False)
+        e = L.groupby("Empresa", as_index=False)[["Custo empresa"]].sum().rename(columns={"Custo empresa": "Salarial"})
+        ie = PAG_P.groupby("Empresa")["Valor"].sum() if not PAG_P.empty else pd.Series(dtype=float)
+        e = e.merge(ie.rename("Indemnizações").reset_index(), on="Empresa", how="outer").fillna(0.0) if len(ie) else e.assign(Indemnizações=0.0)
+        e["Total"] = e["Salarial"] + e["Indemnizações"]
+        e = e.sort_values("Total")
+        fe = px.bar(e, x=["Salarial", "Indemnizações"] if e["Indemnizações"].sum() else ["Salarial"], y="Empresa", orientation="h",
+                    title="Custo por empresa", color_discrete_sequence=[VERMELHO, "#5c0d18"], labels={"value": "MT", "variable": ""})
+        grafico(fe, max(300, 40 * len(e) + 100), bool(e["Indemnizações"].sum()))
     with c2:
-        comp = pd.DataFrame({"Componente": ["Salário líquido", "IRPS", "INSS colaborador", "INSS empresa", "Outros descontos"],
+        comp = pd.DataFrame({"Componente": ["Salário líquido", "IRPS", "INSS colaborador", "INSS empresa", "Outros descontos", "Indemnizações"],
                              "MT": [L["Salario Liquido"].sum(), L["IRPS"].sum(), L["INSS Colaborador"].sum(), L["INSS Empresa"].sum(),
-                                    max(L["Total de Descontos"].sum() - L["IRPS"].sum() - L["INSS Colaborador"].sum(), 0)]})
+                                    max(L["Total de Descontos"].sum() - L["IRPS"].sum() - L["INSS Colaborador"].sum(), 0), ind_pago]})
+        comp = comp[comp["MT"] > 0]
         grafico(px.pie(comp, names="Componente", values="MT", hole=.55, title="Para onde vai o custo",
-                       color_discrete_sequence=["#7a1220", VERMELHO, "#efb0b6", "#e27f89", "#f7d9dc"]), 360)
+                       color_discrete_sequence=["#7a1220", VERMELHO, "#efb0b6", "#e27f89", "#f7d9dc", "#5c0d18"]), 360)
 
-    d = L.groupby("Departamento", as_index=False).agg(custo=("Custo empresa", "sum"), pessoas=("chave", "nunique")).sort_values("custo", ascending=False).head(15)
+    d = L.groupby("Departamento", as_index=False).agg(custo=("Custo empresa", "sum"), pessoas=("chave", "nunique"))
+    if not PAG_P.empty:
+        idp = PAG_P.groupby("Departamento")["Valor"].sum()
+        d = d.merge(idp.rename("ind").reset_index(), on="Departamento", how="outer").fillna({"custo": 0.0, "pessoas": 0, "ind": 0.0})
+        d["custo"] = d["custo"] + d["ind"]
+    d = d.sort_values("custo", ascending=False).head(15)
     grafico(px.bar(d.sort_values("custo"), x="custo", y="Departamento", orientation="h", title="Custo por departamento (top 15)",
                    text_auto=".3s", color_discrete_sequence=["#7a1220"], labels={"custo": "MT"}), max(320, 30 * len(d) + 100), False)
 
@@ -506,8 +564,17 @@ if escolha == "Custo do Capital Humano":
         INSS_emp=("INSS Empresa", "sum"), IRPS=("IRPS", "sum"), Liquido=("Salario Liquido", "sum"), Custo=("Custo empresa", "sum"),
     ).sort_values("Custo", ascending=False)
     t = t.rename(columns={"INSS_colab": "INSS colab.", "INSS_emp": "INSS emp.", "Liquido": "Líquido", "Custo": "Custo empresa"})
+    colunas_num = ["Vencimento", "INSS colab.", "INSS emp.", "IRPS", "Líquido", "Custo empresa"]
+    if TEM_IND:
+        ied = PAG_P.groupby(["Empresa", "Departamento"])["Valor"].sum().rename("Indemnizações").reset_index() if not PAG_P.empty else pd.DataFrame(columns=["Empresa", "Departamento", "Indemnizações"])
+        t = t.merge(ied, on=["Empresa", "Departamento"], how="outer")
+        t[colunas_num + ["Indemnizações"]] = t[colunas_num + ["Indemnizações"]].astype(float).fillna(0.0)
+        t["Colaboradores"] = t["Colaboradores"].fillna(0).astype(int)
+        t["Custo total"] = t["Custo empresa"] + t["Indemnizações"]
+        t = t.sort_values("Custo total", ascending=False)
+        colunas_num += ["Indemnizações", "Custo total"]
     st.dataframe(t, width="stretch", hide_index=True,
-                 column_config={c: st.column_config.NumberColumn(format="%.2f") for c in ["Vencimento", "INSS colab.", "INSS emp.", "IRPS", "Líquido", "Custo empresa"]})
+                 column_config={c: st.column_config.NumberColumn(format="%.2f") for c in colunas_num})
 
 # ================================================================ 2. Perfil dos Colaboradores
 elif escolha == "Perfil dos Colaboradores":
@@ -772,8 +839,8 @@ if escolha == "Indemnizações":
     st.title("Indemnizações")
     st.caption("Planos de indemnização (anos completos × vencimento base) e respectivas prestações. "
                "Os filtros Empresa, Departamento e Colaborador aplicam-se; Ano e Mês escolhem o mês das prestações (por data limite).")
-    ind, pre = carregar_indemnizacoes(versao_f.read_text() if versao_f.exists() else "0")
-    if not meta.get("indemnizacoes"):
+    ind, pre = IND, PRE
+    if not TEM_IND:
         st.info("As indemnizações não foram lidas: abra uma vez a página Indemnizações do Sistema RH (e cole o endereço do fluxo) "
                 "e depois carregue em «Actualizar dados» no Dashboard.")
         st.stop()
