@@ -278,12 +278,15 @@ export function totaisEfectivos(l) {
 
 // ---------- folha (pré-visualização e exportação) ----------
 // Filtros como no VBA: Empresa, Departamento e Colaborador (vazio ou "TODOS" = todos).
-export function linhasFolha(lancamentos, ano, mes, {empresa = "", departamento = "", codigo = ""} = {}) {
+export function filtrarFolha(lancamentos, ano, mes, {empresa = "", departamento = "", codigo = ""} = {}) {
   const todos = v => !texto(v) || igual(v, "TODOS");
   return lancamentos.filter(l => periodoIgual(l, ano, mes) &&
     (todos(empresa) || igual(campo(l, "Empresa"), empresa)) &&
     (todos(departamento) || igual(campo(l, "Departamento"), departamento)) &&
-    (!texto(codigo) || normalizarCodigo(campo(l, "Codigo")) === normalizarCodigo(codigo)))
+    (!texto(codigo) || normalizarCodigo(campo(l, "Codigo")) === normalizarCodigo(codigo)));
+}
+export function linhasFolha(lancamentos, ano, mes, filtros = {}) {
+  return filtrarFolha(lancamentos, ano, mes, filtros)
     .map(l => {
       const t = totaisEfectivos(l), base = n(campo(l, "Vencimento Base")), sub = n(campo(l, "Subsídios"));
       const temVenc = Object.hasOwn(l, "Vencimento");
