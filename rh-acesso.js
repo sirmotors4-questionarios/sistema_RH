@@ -92,3 +92,16 @@ export function guardarUrlGravacao(url) {
   if (String(url).trim() === urlGuardada()) throw Error('Este é o endereço do fluxo de consulta; cole o do RH_API_Actualizar.');
   escrever('localStorage', KEY_URL_GRAVAR, String(url).trim());
 }
+
+// Endereço do fluxo RH_API_Indemnizacoes: secreto, só neste navegador.
+const KEY_URL_INDEMN = 'rh.acesso.url.indemnizacoes';
+export function urlIndemnizacoes() {
+  const url = ler('localStorage', KEY_URL_INDEMN);
+  return validarUrl(url) ? url : '';
+}
+export function guardarUrlIndemnizacoes(url) {
+  if (!validarUrl(url)) throw Error('Endereço do fluxo inválido. Cole o URL completo do gatilho HTTP do RH_API_Indemnizacoes (contém "sig=").');
+  const u = String(url).trim();
+  if (u === urlGuardada() || u === urlGravacao()) throw Error('Este endereço é de outro fluxo; cole o do RH_API_Indemnizacoes.');
+  escrever('localStorage', KEY_URL_INDEMN, u);
+}
