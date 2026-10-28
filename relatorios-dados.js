@@ -2,6 +2,7 @@
 // tabelas, notas), igual para a pré-visualização, o PDF e o Word. Sem DOM: testável em Node.
 import * as M from "./rh-modulos.js";
 import {linhasFolha, somar} from "./rh-folha.js";
+import * as I from "./indemnizacoes.js";
 
 const n = v => M.numero(v) ?? 0;
 const t = v => String(v ?? "").trim();
@@ -26,7 +27,9 @@ export const CATALOGO = Object.freeze([
   {id: "assiduidade", titulo: "Relatório de Assiduidade e Horas Extra", icone: "◷", precisa: ["mes"],
    descricao: "Faltas justificadas e injustificadas e horas extra do mês, por departamento e por colaborador."},
   {id: "evolucao", titulo: "Relatório de Custos com Pessoal — 12 meses", icone: "↗", precisa: ["doze"],
-   descricao: "Evolução mensal do efectivo processado, massa salarial, encargos e custo total nos últimos 12 meses, com totais por empresa."}
+   descricao: "Evolução mensal do efectivo processado, massa salarial, encargos e custo total nos últimos 12 meses, com totais por empresa."},
+  {id: "indemnizacoes", titulo: "Relatório de Indemnizações", icone: "◈", precisa: ["indemnizacoes"],
+   descricao: "Responsabilidades com indemnizações: planos em curso, prestações do mês, valores pagos, saldo, atrasos e calendário dos próximos 12 meses, por empresa."}
 ]);
 
 function cabecalho(id, extra = {}) {
@@ -353,5 +356,68 @@ export function relatorioEvolucao({lancPorMes, empresa = ""}) {
       total: ["Total", mt(tot("venc")), mt(tot("inssEmp")), mt(tot("custo")), "100,0%"]}});
   }
   r.notas.push("Meses sem lançamentos aparecem com «—» e não entram nas médias.");
+  return r;
+}
+
+
+// ---------- Indemnizações ----------
+// indemnizacoes/prestacoes: linhas de tbl_indemnizacoes e tbl_indemnizacoes_prestacoes. Planos anulados ficam de fora.
+const dataPt = iso => iso ? iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4) : "—";
+export function relatorioIndemnizacoes({indemnizacoes = [], prestacoes = [], ano, mes, empresa = "", hoje}) {
+  const hj = hojeISO(hoje);
+  const todos = I.indemnizacoes(indemnizacoes).filter(i => !/anulad/i.test(i.estado));
+  const lista = empresa ? todos.filter(i => i.empresa.toUpperCase() === empresa.toUpperCase()) : todos;
+  const ids = new Set(lista.map(i => i.id));
+  const pre = I.prestacoes(prestacoes).filter(p => ids.has(p.indemnizacao));
+  const r = cabecalho("indemnizacoes", {periodo: nomeMes(ano, mes), ambito: textoEmpresa(empresa)});
+  if (!lista.length) { r.vazio = "Não há indemnizações registadas" + (empresa ? " para " + empresa : "") + "."; return r; }
+  const soma = arr => arr.reduce((s, p) => s + p.valor, 0);
+  const chaveMes = ano + "-" + String(mes).padStart(2, "0");
+  const doMes = pre.filter(p => (p.dataLimite || "").slice(0, 7) === chaveMes).sort((a, b) => a.dataLimite.localeCompare(b.dataLimite));
+  const atraso = pre.filter(p => I.emAtraso(p, hj)).sort((a, b) => a.dataLimite.localeCompare(b.dataLimite));
+  const total = lista.reduce((s, i) => s + i.total, 0), pago = soma(pre.filter(I.paga));
+  const resumos = lista.map(i => ({i, r: I.resumo(i, pre)}));
+  const emCurso = resumos.filter(x => !x.r.concluida);
+  r.kpis = [
+    {rotulo: "Total comprometido", valor: mt(total) + " MT", nota: int(lista.length) + " plano(s) · " + int(emCurso.length) + " em curso"},
+    {rotulo: "Valor pago", valor: mt(pago) + " MT", nota: pct(pago, total) + " do total"},
+    {rotulo: "Saldo por pagar", valor: mt(total - pago) + " MT", nota: "responsabilidade em aberto"},
+    {rotulo: "Previsto no mês", valor: mt(soma(doMes)) + " MT", nota: int(doMes.length) + " prestação(ões) em " + M.NOME_MES[mes - 1].toLowerCase()},
+    {rotulo: "Pago no mês", valor: mt(soma(doMes.filter(I.paga))) + " MT", nota: "das prestações do mês"},
+    {rotulo: "Em atraso", valor: mt(soma(atraso)) + " MT", nota: int(atraso.length) + " prestação(ões) vencida(s)"}
+  ];
+  const sec = [];
+  sec.push({titulo: "Síntese", paragrafos: [
+    `A ${dataPt(hj)}, existem ${int(lista.length)} plano(s) de indemnização (${textoEmpresa(empresa).toLowerCase()}), num total de ${mt(total)} MT, dos quais foram pagos ${mt(pago)} MT (${pct(pago, total)}). O saldo por pagar é de ${mt(total - pago)} MT.`,
+    `Em ${nomeMes(ano, mes)} vencem ${int(doMes.length)} prestação(ões), no valor de ${mt(soma(doMes))} MT, das quais ${mt(soma(doMes.filter(I.paga)))} MT já pagos.` +
+      (atraso.length ? ` Há ${int(atraso.length)} prestação(ões) em atraso, no valor de ${mt(soma(atraso))} MT, que requerem regularização.` : " Não há prestações em atraso.")]});
+  sec.push({titulo: "Prestações de " + nomeMes(ano, mes), tabela: doMes.length ? {
+    cols: [{t: "Colaborador"}, {t: "Empresa"}, {t: "Prest.", num: true}, {t: "Data limite"}, {t: "Valor", num: true}, {t: "Situação"}, {t: "Pago em"}],
+    linhas: doMes.map(p => { const i = lista.find(x => x.id === p.indemnizacao); return [p.nome || i?.nome || p.codigo, i?.empresa || p.empresa, p.numero + "/" + (i?.n || "—"), dataPt(p.dataLimite), mt(p.valor), I.situacao(p, hj), dataPt(p.dataPagamento)]; }),
+    total: ["Total", "", "", "", mt(soma(doMes)), "", ""]} : null,
+    paragrafos: doMes.length ? [] : ["Não há prestações com data limite neste mês."]});
+  sec.push({titulo: "Planos de indemnização", tabela: {
+    cols: [{t: "Colaborador"}, {t: "Empresa"}, {t: "Saída"}, {t: "Anos", num: true}, {t: "Venc. base", num: true}, {t: "Total", num: true}, {t: "Pago", num: true}, {t: "Saldo", num: true}, {t: "Pagas", num: true}, {t: "Próxima"}],
+    linhas: resumos.sort((a, b) => (a.r.proxima?.dataLimite || "9999").localeCompare(b.r.proxima?.dataLimite || "9999")).map(({i, r: x}) =>
+      [i.nome, i.empresa, dataPt(i.referencia), int(i.anos), mt(i.base), mt(i.total), mt(x.pago), mt(x.saldo), x.pagas + "/" + x.prestacoes.length, x.proxima ? dataPt(x.proxima.dataLimite) : "Concluído"]),
+    total: ["Total", "", "", "", "", mt(total), mt(pago), mt(total - pago), "", ""]}});
+  if (!empresa) {
+    const g = agrupar(lista, i => i.empresa, {total: i => i.total, pago: i => I.resumo(i, pre).pago});
+    sec.push({titulo: "Por empresa", tabela: {cols: [{t: "Empresa"}, {t: "Planos", num: true}, {t: "Total", num: true}, {t: "Pago", num: true}, {t: "Saldo", num: true}, {t: "% do total", num: true}],
+      linhas: g.sort((a, b) => b.total - a.total).map(x => [x.chave, int(x.n), mt(x.total), mt(x.pago), mt(x.total - x.pago), pct(x.total, total)]),
+      total: ["Total", int(lista.length), mt(total), mt(pago), mt(total - pago), "100,0%"]}});
+  }
+  const meses = I.totaisMensais(lista, pre, ano, mes, 0, 11);
+  sec.push({titulo: "Calendário de pagamentos — próximos 12 meses", tabela: {
+    cols: [{t: "Mês"}, {t: "Prestações", num: true}, {t: "Previsto", num: true}, {t: "Pago", num: true}, {t: "Por pagar", num: true}],
+    linhas: meses.map(m => [M.NOME_MES[m.mes - 1] + " " + m.ano, m.n ? int(m.n) : "—", m.n ? mt(m.previsto) : "—", m.n ? mt(m.pago) : "—", m.n ? mt(m.previsto - m.pago) : "—"]),
+    total: ["Total", int(meses.reduce((s, m) => s + m.n, 0)), mt(meses.reduce((s, m) => s + m.previsto, 0)), mt(meses.reduce((s, m) => s + m.pago, 0)), mt(meses.reduce((s, m) => s + m.previsto - m.pago, 0))]}});
+  if (atraso.length) sec.push({titulo: "Prestações em atraso", tabela: {
+    cols: [{t: "Colaborador"}, {t: "Data limite"}, {t: "Dias", num: true}, {t: "Valor", num: true}],
+    linhas: atraso.map(p => [p.nome || p.codigo, dataPt(p.dataLimite), int((Date.parse(hj) - Date.parse(p.dataLimite)) / 86400000), mt(p.valor)]),
+    total: ["Total", "", "", mt(soma(atraso))]}});
+  r.secoes = sec.map((x, k) => ({...x, titulo: (k + 1) + ". " + x.titulo}));
+  r.notas.push("Indemnização = anos completos de trabalho (da admissão à data de saída) × vencimento base. Planos anulados não são considerados.");
+  r.notas.push("Situação «Em atraso»: prestação não paga cuja data limite já passou à data do relatório.");
   return r;
 }

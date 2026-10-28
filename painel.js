@@ -24,6 +24,13 @@ const ALT_LANC = {"Codigo": ["Código"], "Mês": ["Mes"], "Profissao": ["Profiss
 export function linhasFuncionarios(rows) {
   return rows.map(l => Object.fromEntries(Object.entries(COLUNAS_FUNCIONARIOS).map(([k, alt]) => [k, M.campo(l, ...alt)])));
 }
+const COLUNAS_IND = ["ID_Indemnizacao", "Empresa", "Codigo", "Nome", "Departamento", "Data Admissao", "Data Referencia",
+  "Anos de Trabalho", "Vencimento Base", "Valor Total", "Numero Prestacoes", "Estado"];
+const COLUNAS_PRE = ["ID_Prestacao", "ID_Indemnizacao", "Empresa", "Codigo", "Nome", "Numero", "Data Limite", "Valor", "Estado", "Data Pagamento"];
+const so = cols => rows => (rows || []).map(l => Object.fromEntries(cols.map(k => [k, l[k] ?? ""])));
+export const linhasIndemnizacoes = so(COLUNAS_IND);
+export const linhasPrestacoes = so(COLUNAS_PRE);
+
 export function linhasLancamentos(rows) {
   return rows.map(l => Object.fromEntries(COLUNAS_LANCAMENTOS.map(k => [k, M.campo(l, k, ...(ALT_LANC[k] || []))])));
 }
@@ -95,14 +102,19 @@ export function iniciarPainel(ctx) {
       const ultimo = (await ctx.periodoMaisRecente()) || {ano: new Date().getFullYear(), mes: new Date().getMonth() + 1};
       const lista = mesesAte(ultimo);
       const {rows, falhas} = await lerMeses(lista, forcar);
+      // Indemnizações: só se a página Indemnizações já estiver ligada (fluxo próprio); sem isso o painel avisa.
+      let ind = null;
+      if (ctx.indemnizacoes) { estado("A ler as indemnizações…"); ind = await ctx.indemnizacoes(forcar).catch(() => null); }
       const nome = p => M.NOME_MES[p.mes - 1].slice(0, 3) + " " + p.ano;
       const meta = {
         gerado: new Date().toLocaleString("pt-MZ", {dateStyle: "short", timeStyle: "short"}),
+        indemnizacoes: Boolean(ind),
         meses: `${nome(lista[0])} – ${nome(lista[lista.length - 1])} (${MESES_HISTORICO} meses)` + (falhas.length ? ` · ${falhas.length} mês(es) não lidos` : "")
       };
       await espera;
       iframe.contentWindow.postMessage({tipo: "rh-dashboard-dados", dados: {
-        funcionarios: linhasFuncionarios(funcionarios), lancamentos: linhasLancamentos(rows), meta}}, location.origin);
+        funcionarios: linhasFuncionarios(funcionarios), lancamentos: linhasLancamentos(rows),
+        indemnizacoes: linhasIndemnizacoes(ind?.indemnizacoes), prestacoes: linhasPrestacoes(ind?.prestacoes), meta}}, location.origin);
       estado(`Dados enviados (${Math.round((Date.now() - t0) / 1000)} s): ${funcionarios.length} colaboradores, ${rows.length} lançamentos` +
         (falhas.length ? ` · não foi possível ler ${falhas.map(nome).join(", ")}` : "") + ". A abrir o dashboard…");
     } catch (e) {
