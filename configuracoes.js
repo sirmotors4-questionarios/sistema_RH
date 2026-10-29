@@ -120,6 +120,9 @@ async function loadRemote(){
  try{
   const result=await loadConfiguracoes(deps());
   utilizador=result.utilizador;
+  // Só o Superadministrador usa as Configurações; os outros perfis voltam à página principal.
+  if(utilizador.perfil!=="Superadministrador"){location.replace("index.html");return}
+  document.documentElement.classList.add("autorizado");
   applyTables(result.tables,"Fonte: Excel no SharePoint via Power Automate ("+new Date().toLocaleTimeString("pt-MZ")+").");
   $("#integration-badge").textContent="Motor ligado · Power Automate";
   $("#propose").disabled=!utilizador.propor;
@@ -127,6 +130,8 @@ async function loadRemote(){
   carregarTiposContrato().then(carregarEscaloes);
  }catch(error){
   utilizador=null;authView("error",error.message);
+  if(error.code==="RH_FORBIDDEN"||error.code==="RH_AUTH"){location.replace("index.html");return}
+  document.documentElement.classList.add("autorizado"); // mostra o erro de ligação; sem dados nada é carregado
  }finally{button.disabled=false;}
 }
 $("#signin").addEventListener("click",()=>signIn().catch(e=>authView("error",e.message)));

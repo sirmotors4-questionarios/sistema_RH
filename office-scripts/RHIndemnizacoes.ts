@@ -492,6 +492,8 @@ function escaloes(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string)
     const t = workbook.getTable(T_ESC);
     return {ok: true, accao: "escaloes", listaEscaloes: t ? ler(t) : "[]"};
   }
+  // Gravar e aplicar escalões são Configurações: só o Superadministrador.
+  if (!eSuperadministrador(workbook, utilizador)) return erro("Só um Superadministrador activo pode alterar os escalões.");
   if (op === "gravar") return gravarEscaloes(workbook, p, utilizador);
   if (op === "aplicar") return aplicarEscaloesMes(workbook, p);
   return erro("Operação de escalões desconhecida: " + op);
@@ -716,4 +718,11 @@ function gravarUtilizador(t: ExcelScript.Table, lista: Conta[], p: Pedido, eu: s
     definirCelulas(t, existente[0].i, valores);
   }
   return {ok: true, accao: "acessos", listaUtilizadores: listarUtilizadores(t)};
+}
+
+function eSuperadministrador(workbook: ExcelScript.Workbook, utilizador: string): boolean {
+  const t = workbook.getTable(T_UTIL);
+  if (!t) return false;
+  const c = contas(t).filter(x => x.email === emailNorm(utilizador));
+  return c.length === 1 && c[0].activo && c[0].perfil === "Superadministrador";
 }

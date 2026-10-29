@@ -186,3 +186,15 @@ test('edição de lançamento: valida entradas, sincroniza contrato e bloqueia F
   const fin = F.prepararEdicaoLancamento({original: {...original, 'Estado do Lançamento': 'Finalizado'}, valores, funcionario: f, ano: 2026, mes: 4});
   assert.match(fin.erros[0], /Finalizado/);
 });
+
+test('filtro de escalão na folha e lista de escalões por ordem natural', async () => {
+  const F = await import('../rh-folha.js');
+  const l = [{Ano: '2026', 'Mês': 'Outubro', Empresa: 'A', Codigo: '1', 'Escalão': '10º Escalão'},
+    {Ano: '2026', 'Mês': 'Outubro', Empresa: 'A', Codigo: '2', 'Escalão': '2º Escalão'},
+    {Ano: '2026', 'Mês': 'Outubro', Empresa: 'A', Codigo: '3', 'Escalão': '1º Escalão'},
+    {Ano: '2026', 'Mês': 'Outubro', Empresa: 'A', Codigo: '4'}];
+  assert.deepEqual(F.escaloesPresentes(l), ['1º Escalão', '2º Escalão', '10º Escalão']);
+  assert.deepEqual(F.filtrarFolha(l, 2026, 10, {escalao: '1º escalão'}).map(x => x.Codigo), ['3']);
+  assert.deepEqual(F.filtrarFolha(l, 2026, 10, {escalao: F.SEM_ESCALAO}).map(x => x.Codigo), ['4']);
+  assert.equal(F.filtrarFolha(l, 2026, 10, {}).length, 4);
+});
