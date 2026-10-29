@@ -83,3 +83,15 @@ test('colaboradoresChaves pede o modo chaves e devolve as contagens', async () =
   assert.equal(enviado.action, 'colaboradores_chaves');
   assert.deepEqual(r, {preenchidas: 384, semCodigo: 76});
 });
+
+test('escalões vão pelo fluxo das indemnizações com dados.modulo', async () => {
+  const {escaloesGravar, escaloesLer} = await import('../rh-api.js');
+  let enviado = null;
+  const fetchImpl = async (url, init) => { enviado = JSON.parse(init.body); return resposta(200, {ok: true, accao: 'escaloes', alteradas: 2, listaEscaloes: '[{"Empresa":"X"}]'})(); };
+  const r = await escaloesGravar({empresa: 'X', criterio: 'Salario Liquido', faixas: [{escalao: 'A', inicio: 0}]}, {getToken, fetchImpl, url: 'u'});
+  assert.equal(enviado.action, 'indemnizacoes_listar');
+  const dados = JSON.parse(enviado.dados ?? enviado.params?.dados);
+  assert.equal(dados.modulo, 'escaloes'); assert.equal(dados.op, 'gravar');
+  assert.deepEqual(r, {gravados: 2, linhas: [{Empresa: 'X'}]});
+  assert.deepEqual(await escaloesLer({getToken, fetchImpl, url: 'u'}), [{Empresa: 'X'}]);
+});

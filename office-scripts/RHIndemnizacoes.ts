@@ -53,7 +53,7 @@ interface Pedido {
   motivo?: string; dataAdenda?: string; inicio?: string; fim?: string; documento?: string;
   alteracoes?: Alteracao[]; aplicar?: boolean; ids?: string[];
   // escalões
-  op?: string; criterio?: string; faixas?: Faixa[]; ano?: number; mesNome?: string;
+  modulo?: string; op?: string; criterio?: string; faixas?: Faixa[]; ano?: number; mesNome?: string;
 }
 interface Faixa { escalao: string; inicio: number; }
 
@@ -67,7 +67,8 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
     if (a === "registar") return registarAdenda(workbook, p, utilizador);
     if (a === "aplicar") return aplicarAdendas(workbook, p, utilizador);
     if (a === "revogar") return revogarAdendas(workbook, p, utilizador);
-    if (a === "escaloes") return escaloes(workbook, p, utilizador);
+    // Os escalões também chegam por qualquer acção já aceite pelo fluxo, com dados.modulo = "escaloes".
+    if (a === "escaloes" || p.modulo === "escaloes") return escaloes(workbook, p, utilizador);
     const ind = workbook.getTable(T_IND), pre = workbook.getTable(T_PRE);
     if (!ind || !pre) return erro("As tabelas das indemnizações ainda não existem. Corra a acção «preparar».");
     if (a === "listar") return {ok: true, accao: a, listaIndemnizacoes: ler(ind), listaPrestacoes: ler(pre)};
