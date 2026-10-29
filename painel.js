@@ -80,7 +80,7 @@ export function iniciarPainel(ctx) {
         const p = fila.shift();
         try { rows.push(...await ctx.carregarMes(p.ano, p.mes, forcar)); } catch { falhas.push(p); }
         feitos += 1;
-        estado(`A ler lançamentos do Excel… ${feitos} de ${lista.length} meses`);
+        estado(`A ler lançamentos… ${feitos} de ${lista.length} meses`);
       }
     }
     await Promise.all([trabalhador(), trabalhador(), trabalhador()]); // 3 leituras em paralelo

@@ -62,7 +62,7 @@ export function documentoHTML(doc, {utilizador = ""} = {}) {
         el("div", {}, el("i"), el("span", {text: "Elaborado por (Dep. Recursos Humanos)"})),
         el("div", {}, el("i"), el("span", {text: "Aprovado por"})))
     ],
-    el("footer", {class: "rel-doc-rod", text: "Fonte: Gestão de Colaboradores.xlsx · Sistema RH SIR Grupo"}));
+    el("footer", {class: "rel-doc-rod", text: "Fonte: Sistema RH SIR Grupo"}));
 }
 
 // ---------------------------------------------------------------- PDF
@@ -287,7 +287,7 @@ export function iniciarRelatorios(ctx) {
     if (c.precisa.includes("indemnizacoes")) {
       estado("A ler as indemnizações…");
       const d = ctx.indemnizacoes ? await ctx.indemnizacoes() : null;
-      if (!d) throw Error("Para este relatório, abra primeiro a página Indemnizações e cole o endereço do fluxo RH_API_Indemnizacoes.");
+      if (!d) throw Error("Para este relatório, abra primeiro a página Indemnizações e cole o endereço de gestão.");
       base.indemnizacoes = d.indemnizacoes; base.prestacoes = d.prestacoes;
     }
     if (c.precisa.includes("doze")) {

@@ -125,11 +125,11 @@ function carregar(modulo,forcar=false){
  if(modulo==="lancamentos")return carregarLancamentos(forcar?{ano:Number(year.value),mes:Number(month.value)}:null);
  if(!forcar&&dados[modulo])return Promise.resolve(dados[modulo]);
  if(pedidos[modulo])return pedidos[modulo];
- setSource(modulo,modulo==="lancamentos"?"A carregar do Excel (1800+ lançamentos; pode demorar cerca de 1 minuto)…":"A carregar do Excel…");
+ setSource(modulo,modulo==="lancamentos"?"A carregar (1800+ lançamentos; pode demorar cerca de 1 minuto)…":"A carregar…");
  pedidos[modulo]=loadModulo(modulo,transporte()).then(r=>{
   dados[modulo]={tabelas:r.tabelas,carregado:new Date()};
   if(r.utilizador)mostrarUtilizador(r.utilizador);
-  setSource(modulo,"Fonte: Gestão de Colaboradores.xlsx via Power Automate · "+dados[modulo].carregado.toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}));
+  setSource(modulo,"Actualizado · "+dados[modulo].carregado.toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}));
   render();
   return dados[modulo];
  }).catch(e=>{
@@ -150,7 +150,7 @@ function carregarLancamentos(periodo){
  let p=periodo||(()=>{const d=new Date();return{ano:d.getFullYear(),mes:d.getMonth()+1}})();
  const tarefa=(async()=>{
   for(let tentativa=0;tentativa<(procurar?7:1);tentativa++){
-   setSource("lancamentos","A carregar "+M.NOME_MES[p.mes-1]+" "+p.ano+" do Excel…");
+   setSource("lancamentos","A carregar "+M.NOME_MES[p.mes-1]+" "+p.ano+" …");
    const r=await loadModulo("lancamentos",{...transporte(),params:{ano:p.ano,mes:p.mes}});
    if(r.utilizador)mostrarUtilizador(r.utilizador);
    const todas=r.tabelas["tbl_lançamento"]||[];
@@ -161,7 +161,7 @@ function carregarLancamentos(periodo){
     dados.lancamentos={tabelas:r.tabelas,periodo:p,carregado:new Date()};
     guardarMeses(todas);meses.set(p.ano+"-"+p.mes,doPeriodo(todas,p.ano,p.mes));
     year.value=String(p.ano);month.value=String(p.mes);
-    setSource("lancamentos","Fonte: Gestão de Colaboradores.xlsx via Power Automate · "+dados.lancamentos.carregado.toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}));
+    setSource("lancamentos","Actualizado · "+dados.lancamentos.carregado.toLocaleTimeString("pt-MZ",{hour:"2-digit",minute:"2-digit"}));
     render();return dados.lancamentos;
    }
    p=p.mes===1?{ano:p.ano-1,mes:12}:{ano:p.ano,mes:p.mes-1};
@@ -391,7 +391,7 @@ function renderFerias(){
  const reg=linhas("ferias","tbl_ferias"),cols=M.colunas(reg).slice(0,8),head=$("leave-head"),body=$("leave-body");
  head.replaceChildren();body.replaceChildren();
  (cols.length?cols:["Registos"]).forEach(c=>{const th=document.createElement("th");th.textContent=c;head.append(th)});
- if(!reg.length)emptyRow(body,1,"Ainda não existem registos de férias na tbl_ferias.");
+ if(!reg.length)emptyRow(body,1,"Ainda não existem registos de férias.");
  reg.slice(0,MAX_LINHAS).forEach(r=>{const tr=document.createElement("tr");cols.forEach(c=>cell(tr,/data|inicio|fim/i.test(c)?M.formatarData(r[c]):r[c]));body.append(tr)});
  const fb=$("holiday-body");fb.replaceChildren();
  const fs=M.feriados(linhas("ferias","tbl_feriados"));
@@ -401,9 +401,9 @@ function renderFerias(){
 function renderDashboard(){
  if(dados.funcionarios){const l=M.colaboradores(linhas("funcionarios","tbl_funcionarios"));$("m-activos").textContent=String(l.filter(c=>M.activo(c.estado)).length);$("m-activos-sub").textContent="de "+l.length+" registados"}
  if(dados.contratos){const a=M.adendas(linhas("contratos","tbl_adendas"));$("m-adendas").textContent=String(a.length);$("m-adendas-sub").textContent=a.filter(x=>M.activo(x.estado)||/vigor/i.test(x.estado)).length+" em vigor"}
- if(dados.ferias){const n=linhas("ferias","tbl_ferias").length;$("m-ferias").textContent=String(n);$("m-ferias-sub").textContent=n?"na tbl_ferias":"Sem registos"}
+ if(dados.ferias){const n=linhas("ferias","tbl_ferias").length;$("m-ferias").textContent=String(n);$("m-ferias-sub").textContent=n?"registados":"Sem registos"}
  if(dados.lancamentos){const p=dados.lancamentos.periodo||M.periodos(linhas("lancamentos","tbl_lançamento"))[0];if(p){const l=M.lancamentos(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes);$("m-mes").textContent=M.NOME_MES[p.mes-1].slice(0,3)+" "+p.ano;if(!l.length){$("m-mes-sub").textContent="Sem lançamentos nos últimos meses";}else $("m-mes-sub").textContent=l.length+" lançamentos · "+(M.contagem(l,x=>x.estado)[0]?.[0]||"")}}
- if(Object.keys(dados).length)$("dash-badge").textContent="Dados do Excel";
+ if(Object.keys(dados).length)$("dash-badge").textContent="Dados reais";
 }
 function render(){ficha.actualizar();renderEmployees();renderContratos();renderAdendas();renderSalarios();renderFerias();renderDashboard()}
 
@@ -450,8 +450,8 @@ function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAce
  document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
 function ligar(quem,via){
  ligado=true;botoes();
- $("status-pill").textContent="● Ligado ao Excel";$("source-title").textContent="Ligado ao SharePoint";$("source-sub").textContent=quem;
- estadoLigacao("live","Sessão iniciada: "+quem,"Os dados vêm do ficheiro Gestão de Colaboradores.xlsx através do Power Automate ("+via+"). Os administradores RH podem criar e editar colaboradores; os restantes módulos são só de consulta.");
+ $("status-pill").textContent="● Ligado";$("source-title").textContent="Sessão iniciada";$("source-sub").textContent=quem;
+ estadoLigacao("live","Sessão iniciada: "+quem,"Entrada por "+via+". Os administradores RH podem criar e editar colaboradores; os restantes perfis só consultam.");
  (precisa[paginaActual]||[]).forEach(m=>carregar(m));
  if(paginaActual==="painel")painel.abrir();
  if(paginaActual==="relatorios")relatorios.abrir();
@@ -460,7 +460,7 @@ function ligar(quem,via){
 function desligar(){
  painel.limpar();relatorios.limpar();indemn.limpar();cacheIndemn=null;
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();$("nav-acessos").hidden=true;$("nav-config").hidden=true;if(paginaActual==="acessos")go("dashboard");
- $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
+ $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
  ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee","pay-escalao"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
  if(ficha.aberta())document.getElementById("ficha").close();
@@ -509,7 +509,7 @@ async function trocar(){
  if(modoTroca==="voluntaria"&&await chaveAcesso(s.email,$("troca-actual").value)!==s.chave)throw Error("O código actual não está certo.");
  const chaveNova=await chaveAcesso(s.email,novo);
  if(chaveNova===s.chave)throw Error("O novo código tem de ser diferente do actual.");
- if(!urlIndemnizacoes())throw Error("Este navegador não tem o endereço do fluxo de gestão (RH_API_Indemnizacoes). Abra o link de primeiro acesso enviado pelo Superadministrador.");
+ if(!urlIndemnizacoes())throw Error("Este navegador não tem o endereço de gestão. Abra o link de primeiro acesso enviado pelo Superadministrador.");
  await acessoTrocar({chaveActual:s.chave,chaveNova},{credenciais:s,url:urlIndemnizacoes()});
  actualizarChaveSessao(chaveNova);
  showToast("Código de acesso alterado.");
@@ -529,7 +529,7 @@ $("access-form").addEventListener("submit",async ev=>{
 });
 $("signin").addEventListener("click",()=>signIn().catch(e=>estadoLigacao("error","Sessão não iniciada",e.message)));
 $("signout").addEventListener("click",()=>{
- if(sessaoAcesso()){sairAcesso();desligar();estadoLigacao("","Sessão terminada","Entre com o seu código de acesso para ver os dados do Excel.");abrirAcesso();return}
+ if(sessaoAcesso()){sairAcesso();desligar();estadoLigacao("","Sessão terminada","Entre com o seu código de acesso para ver os dados.");abrirAcesso();return}
  signOut().catch(e=>estadoLigacao("error","Erro ao terminar sessão",e.message));
 });
 
@@ -622,13 +622,13 @@ const indemn=iniciarIndemnizacoes({
  utilizador:()=>sessaoAcesso()?.email||"",
  // Saída do colaborador antes da indemnização: Estado = Inactivo + Data de Saída + Motivo, pelo mesmo caminho da ficha (RH_API_Actualizar).
  registarSaida:async(linha,{data,motivo})=>{
-  if(!urlGravacao())throw Error("Falta o endereço do fluxo RH_API_Actualizar para gravar a saída (cole-o uma vez na ficha de um colaborador).");
+  if(!urlGravacao())throw Error("Falta o endereço de gravação para gravar a saída (cole-o uma vez na ficha de um colaborador).");
   const original=M.linhaParaFormulario(linha),entrada={...original,Estado:"Inactivo","Data de Saída":data,Motivo:motivo};
   const funcs=linhas("funcionarios","tbl_funcionarios");
   const {dados:d,erros}=M.validarColaborador(entrada,"editar",{original,existentes:funcs});
   if(erros.length)throw Error(erros.join(" "));
   const pedido=M.prepararGravacao("editar",d,{original,cabecalhos:M.colunas(funcs),utilizador:sessaoAcesso()?.email||""});
-  if(pedido.ignorados.length)throw Error("A tbl_funcionarios não tem a coluna de: "+pedido.ignorados.join(", ")+". A saída não foi gravada.");
+  if(pedido.ignorados.length)throw Error("O cadastro não tem a coluna de: "+pedido.ignorados.join(", ")+". A saída não foi gravada.");
   if(!pedido.alteracoes)return;
   await gravarFicha("editar",pedido);
   carregar("funcionarios",true).catch(()=>{});

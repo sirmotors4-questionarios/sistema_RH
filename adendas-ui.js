@@ -88,7 +88,7 @@ export function iniciarAdendas(ctx) {
   function pronto() {
     if (!ctx.ligado()) { ctx.aviso("Inicie sessão para gerir adendas."); return false; }
     if (!ctx.podeGravar()) { ctx.aviso("O seu perfil permite consultar, mas não gravar adendas."); return false; }
-    if (!ctx.temUrl()) { ctx.aviso("Para gravar adendas, abra uma vez a página Indemnizações e cole o endereço do fluxo RH_API_Indemnizacoes."); return false; }
+    if (!ctx.temUrl()) { ctx.aviso("Para gravar adendas, abra uma vez a página Indemnizações e cole o endereço de gestão."); return false; }
     return true;
   }
   const campo = (rot, input, ajuda) => el("label", {class: "ind-campo"}, rot, input, ajuda ? el("small", {text: ajuda}) : null);
@@ -106,7 +106,7 @@ export function iniciarAdendas(ctx) {
     if (!pronto()) return;
     const lista = colaboradores(), hoje = hojeIso();
     const st = {c: null, alts: []};
-    abrir({eyebrow: "NOVA ADENDA", titulo: "Nova adenda contratual", sub: "As alterações ficam registadas na tbl_adendas e, se a vigência já começou, são aplicadas ao cadastro."});
+    abrir({eyebrow: "NOVA ADENDA", titulo: "Nova adenda contratual", sub: "As alterações ficam registadas nas adendas e, se a vigência já começou, são aplicadas ao cadastro."});
     const dl = el("datalist", {id: "ad-colabs"}, ...lista.map(c => el("option", {value: c.codigo + " · " + c.nome + " · " + c.empresa, label: c.estado})));
     const f = {
       colab: el("input", {id: "ad-f-colab", list: "ad-colabs", placeholder: "Código ou nome…", autocomplete: "off"}),
@@ -169,7 +169,7 @@ export function iniciarAdendas(ctx) {
       el("div", {class: "ind-form"}, campo("Colaborador", f.colab), campo("Motivo", f.motivo), lOutro, campo("Data da adenda", f.data),
         campo("Início de vigência", f.inicio), campo("Fim de vigência", f.fim, "Opcional."), campo("Documento de referência", f.doc), campo("Observações", f.obs)),
       resumo, altsBox,
-      el("label", {class: "ind-confirma"}, f.aplicar, " Aplicar já ao cadastro (tbl_funcionarios)"), notaAplicar);
+      el("label", {class: "ind-confirma"}, f.aplicar, " Aplicar já ao cadastro"), notaAplicar);
     st.alts.push({campo: "", novo: "", anterior: ""});
     if (pre) { f.colab.value = pre.codigo + " · " + pre.nome + " · " + pre.empresa; escolher(); }
     desenharAlts(); actualizarAplicar();

@@ -52,7 +52,7 @@ export function urlGuardada() {
 }
 
 export function guardarUrl(url) {
-  if (!validarUrl(url)) throw Error('Endereço do fluxo inválido. Cole o URL completo do gatilho HTTP (contém "sig=").');
+  if (!validarUrl(url)) throw Error('Endereço de acesso inválido. Cole o endereço completo fornecido pelo administrador.');
   escrever('localStorage', KEY_URL, String(url).trim());
 }
 
@@ -71,7 +71,7 @@ export async function entrarComCodigo({email, codigo, url}, deps = {}) {
   if (!validarEmail(email)) throw Error('Indique um e-mail válido.');
   if (!validarCodigo(codigo)) throw Error('O código de acesso tem pelo menos ' + CODIGO_MINIMO + ' caracteres.');
   if (url) guardarUrl(url);
-  if (!urlGuardada()) throw Error('Falta o endereço do fluxo RH_API_Acesso.');
+  if (!urlGuardada()) throw Error('Falta o endereço de acesso.');
   const sessao = {email: normalizarEmail(email), chave: await chaveAcesso(email, codigo, deps.subtle)};
   escrever('sessionStorage', KEY_SESSAO, JSON.stringify(sessao));
   return sessao;
@@ -88,8 +88,8 @@ export function urlGravacao() {
   return validarUrl(url) ? url : '';
 }
 export function guardarUrlGravacao(url) {
-  if (!validarUrl(url)) throw Error('Endereço do fluxo de gravação inválido. Cole o URL completo do gatilho HTTP (contém "sig=").');
-  if (String(url).trim() === urlGuardada()) throw Error('Este é o endereço do fluxo de consulta; cole o do RH_API_Actualizar.');
+  if (!validarUrl(url)) throw Error('Endereço de gravação inválido. Cole o endereço completo fornecido pelo administrador.');
+  if (String(url).trim() === urlGuardada()) throw Error('Este é o endereço de acesso; cole o endereço de gravação.');
   escrever('localStorage', KEY_URL_GRAVAR, String(url).trim());
 }
 
@@ -100,9 +100,9 @@ export function urlIndemnizacoes() {
   return validarUrl(url) ? url : '';
 }
 export function guardarUrlIndemnizacoes(url) {
-  if (!validarUrl(url)) throw Error('Endereço do fluxo inválido. Cole o URL completo do gatilho HTTP do RH_API_Indemnizacoes (contém "sig=").');
+  if (!validarUrl(url)) throw Error('Endereço de gestão inválido. Cole o endereço completo fornecido pelo administrador.');
   const u = String(url).trim();
-  if (u === urlGuardada() || u === urlGravacao()) throw Error('Este endereço é de outro fluxo; cole o do RH_API_Indemnizacoes.');
+  if (u === urlGuardada() || u === urlGravacao()) throw Error('Este endereço é de outro serviço; cole o endereço de gestão.');
   escrever('localStorage', KEY_URL_INDEMN, u);
 }
 
@@ -130,7 +130,7 @@ export function linkConfiguracao(base, {gravacao = false, gestao = true, email =
   if (gestao && urlIndemnizacoes()) cfg.i = urlIndemnizacoes();
   if (gravacao && urlGravacao()) cfg.g = urlGravacao();
   if (email) cfg.e = normalizarEmail(email);
-  if (!cfg.a) throw Error('Este navegador não tem o endereço do fluxo RH_API_Acesso.');
+  if (!cfg.a) throw Error('Este navegador não tem o endereço de acesso.');
   return String(base).split('#')[0] + '#config=' + b64url(JSON.stringify(cfg));
 }
 export function lerConfiguracaoDoLink(hash) {

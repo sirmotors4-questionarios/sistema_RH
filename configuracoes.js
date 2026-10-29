@@ -39,7 +39,7 @@ function simulate(){const target=$("#sim-result");try{
   if(!Number.isFinite(base)||!Number.isFinite(liquido)||base<0||liquido<0)throw Error("Valores de simulação inválidos.");
   const output=simulateRecord(tables,library.value,context(),$("#reference-date").value,{...extra,BASE:base,LIQUIDO:liquido});
   target.className="simulation success";
-  target.textContent="Resultado da simulação: "+String(output.result)+" · Fórmula: "+output.formula.Codigo_Formula+" · Versão: "+output.formula.Versao+". Não confirma equivalência com o VBA nem constitui aprovação.";
+  target.textContent="Resultado da simulação: "+String(output.result)+" · Fórmula: "+output.formula.Codigo_Formula+" · Versão: "+output.formula.Versao+". Não constitui aprovação.";
   target.dataset.validated="true";return;
  }
 
@@ -52,7 +52,7 @@ function simulate(){const target=$("#sim-result");try{
  if(typeof result!=="number"||!Number.isFinite(result))throw Error("A fórmula salarial deve devolver um número finito.");
  const fmt=x=>new Intl.NumberFormat("pt-MZ",{minimumFractionDigits:2,maximumFractionDigits:2}).format(x);
  target.className="simulation success";
- target.textContent="Validação sintáctica concluída. Resultado demonstrativo: "+fmt(result)+" MT · Fórmula: "+expression+". Os cálculos fiscais oficiais e a equivalência com o VBA ainda não foram validados.";
+ target.textContent="Validação sintáctica concluída. Resultado demonstrativo: "+fmt(result)+" MT · Fórmula: "+expression+". Os cálculos fiscais oficiais ainda não foram validados.";
  target.dataset.validated="true";toast("Simulação demonstrativa concluída.");
  }catch(e){target.className="simulation error";target.textContent="Não foi possível validar: "+e.message;target.dataset.validated="false";}}
 $("#simulate").addEventListener("click",simulate);
@@ -78,7 +78,7 @@ function refreshSource(){
   resolved.formulas.forEach(r=>{const option=document.createElement("option");option.value=r.Codigo_Formula;option.textContent=r.Codigo_Formula+" — "+r.Expressao;library.append(option);});
   custom.disabled=true;custom.value="";
   sourceError="";$("#simulate").disabled=!resolved.formulas.length;
-  $("#source-status").textContent="Tabelas carregadas nesta sessão. "+resolved.parameters.length+" parâmetros resolvidos; "+resolved.formulas.length+" fórmulas disponíveis; "+resolved.unavailable.length+" não validadas. "+(sourceLabel||"Excel/Power Automate não ligado.");
+  $("#source-status").textContent="Tabelas carregadas nesta sessão. "+resolved.parameters.length+" parâmetros resolvidos; "+resolved.formulas.length+" fórmulas disponíveis; "+resolved.unavailable.length+" não validadas. "+(sourceLabel||"Sem ligação.");
  }catch(error){sourceError=error.message;$("#source-status").textContent="Erro nas tabelas: "+error.message;$("#simulate").disabled=true;}
 }
 $("#reference-date").value=new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Maputo'});
@@ -116,15 +116,15 @@ function authView(state,message){
 // Acesso por código pessoal (sessão iniciada na página principal, no mesmo separador).
 function deps(){const s=sessaoAcesso(),url=urlGuardada();return s&&url?{credenciais:s,url}:{getToken}}
 async function loadRemote(){
- const button=$("#load-remote");button.disabled=true;authView("","A carregar as configurações do Excel através do Power Automate…");
+ const button=$("#load-remote");button.disabled=true;authView("","A carregar as configurações…");
  try{
   const result=await loadConfiguracoes(deps());
   utilizador=result.utilizador;
   // Só o Superadministrador usa as Configurações; os outros perfis voltam à página principal.
   if(utilizador.perfil!=="Superadministrador"){location.replace("index.html");return}
   document.documentElement.classList.add("autorizado");
-  applyTables(result.tables,"Fonte: Excel no SharePoint via Power Automate ("+new Date().toLocaleTimeString("pt-MZ")+").");
-  $("#integration-badge").textContent="Motor ligado · Power Automate";
+  applyTables(result.tables,"Actualizado ("+new Date().toLocaleTimeString("pt-MZ")+").");
+  $("#integration-badge").textContent="Motor ligado";
   $("#propose").disabled=!utilizador.propor;
   authView("ok",(utilizador.nome||utilizador.email)+" · Perfil: "+utilizador.perfil+(utilizador.propor?"":" (apenas consulta)")+". Configurações carregadas.");
   carregarTiposContrato().then(carregarEscaloes);
@@ -187,7 +187,7 @@ tcForm.addEventListener("submit",ev=>{
  if(dias!==""&&!(Number.isInteger(Number(dias))&&Number(dias)>=0&&Number(dias)<=180)){$("#tc-erro").textContent="O período experimental deve ser um número inteiro de 0 a 180 dias.";return}
  propostos.push({nome,duracao:$("#tc-duracao").value,regime:$("#tc-regime").value,experimental:dias});
  tcForm.reset();tcForm.hidden=true;renderTiposContrato();
- toast("Tipo «"+nome+"» adicionado à lista como proposto. Ainda não foi gravado no Excel.");
+ toast("Tipo «"+nome+"» adicionado à lista como proposto. Ainda não foi gravado.");
 });
 
 // ---------- Escalões salariais (tbl_escaloes_lancamento, via RH_API_Indemnizacoes) ----------
@@ -218,10 +218,10 @@ async function carregarEscaloes(){
  const sel=$("#esc-empresa"),actual=sel.value;
  $("#esc-ligacao").hidden=Boolean(urlIndemnizacoes());
  if(!sessaoAcesso()){escEstado("Inicie sessão com o código de acesso (página principal) para ler e gravar os escalões.");}
- else if(!urlIndemnizacoes()){escEstado("Falta o endereço do fluxo RH_API_Indemnizacoes.");}
+ else if(!urlIndemnizacoes()){escEstado("Falta o endereço de gestão.");}
  else{
-  escEstado("A ler os escalões do Excel…");
-  try{escDefs=ESC.agrupar(await escaloesLer(escTransp()));escCarregado=true;escEstado(escDefs.size?"Escalões lidos da tbl_escaloes_lancamento ("+new Date().toLocaleTimeString("pt-MZ")+").":"Ainda não há escalões gravados. Defina-os abaixo; a tabela é criada na primeira gravação.");}
+  escEstado("A ler os escalões…");
+  try{escDefs=ESC.agrupar(await escaloesLer(escTransp()));escCarregado=true;escEstado(escDefs.size?"Escalões actualizados ("+new Date().toLocaleTimeString("pt-MZ")+").":"Ainda não há escalões gravados. Defina-os abaixo; a tabela é criada na primeira gravação.");}
   catch(e){escEstado("Não foi possível ler os escalões: "+e.message);}
  }
  sel.replaceChildren();
@@ -274,7 +274,7 @@ function escCalculos(){
  $("#esc-sim").textContent=funcionarios?(activos.length+" activos na simulação"+(dist.abaixo?" · "+dist.abaixo+" abaixo do 1.º escalão":"")+(dist.semValor?" · "+dist.semValor+" sem valor no cadastro":"")):"";
 }
 function escPodeGravar(){
- if(!sessaoAcesso()||!urlIndemnizacoes()){$("#esc-erro").textContent="Inicie sessão e indique o endereço do fluxo RH_API_Indemnizacoes.";return false}
+ if(!sessaoAcesso()||!urlIndemnizacoes()){$("#esc-erro").textContent="Inicie sessão e indique o endereço de gestão.";return false}
  if(utilizador&&!utilizador.propor){$("#esc-erro").textContent="O seu perfil ("+utilizador.perfil+") só permite consultar.";return false}
  return true;
 }
@@ -286,7 +286,7 @@ async function escGravar(){
  const b=$("#esc-gravar");b.disabled=true;b.textContent="A gravar…";
  try{const r=await escaloesGravar(ESC.pedidoGravacao(pedido),escTransp());escDefs=ESC.agrupar(r.linhas);toast(r.gravados+" escalões gravados para «"+(pedido.empresa===ESC.TODAS?"Todas as empresas":pedido.empresa)+"». Os próximos lançamentos já os usam.");await carregarEscaloes()}
  catch(e){$("#esc-erro").textContent="Não foi gravado: "+e.message}
- finally{b.disabled=false;b.textContent="Gravar escalões no Excel"}
+ finally{b.disabled=false;b.textContent="Gravar escalões"}
 }
 async function escAplicar(){
  $("#esc-erro").textContent="";

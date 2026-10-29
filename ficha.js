@@ -235,11 +235,11 @@ export function criarFicha(ctx) {
       return;
     }
     const pedido = M.prepararGravacao(modo === "novo" ? "criar" : "editar", dados, {original, cabecalhos: M.colunas(ctx.funcionarios()), utilizador: ctx.utilizador()});
-    if (modo === "editar" && !pedido.alteracoes) { erro.textContent = pedido.ignorados.length ? "Os campos alterados não existem na tbl_funcionarios: " + pedido.ignorados.join(", ") + "." : "Não alterou nenhum campo."; return; }
+    if (modo === "editar" && !pedido.alteracoes) { erro.textContent = pedido.ignorados.length ? "Os campos alterados não existem no cadastro: " + pedido.ignorados.join(", ") + "." : "Não alterou nenhum campo."; return; }
     const btn = $("ficha-guardar"); btn.disabled = true; btn.textContent = "A gravar…";
     try {
       if (!$("ficha-url").hidden && $("ficha-url-input").value.trim()) ctx.guardarUrlGravacao($("ficha-url-input").value);
-      if (!ctx.urlGravacao()) throw Error("Falta o endereço do fluxo RH_API_Actualizar (peça-o ao administrador).");
+      if (!ctx.urlGravacao()) throw Error("Falta o endereço de gravação (peça-o ao administrador).");
       const r = await ctx.gravar(modo === "novo" ? "criar" : "editar", pedido);
       fechar(true);
       ctx.aviso((modo === "novo" ? "Colaborador criado: " : "Alterações gravadas: ") + r.codigo + " · " + r.empresa +

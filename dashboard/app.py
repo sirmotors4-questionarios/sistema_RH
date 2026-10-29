@@ -579,7 +579,7 @@ if escolha == "Custo do Capital Humano":
 # ================================================================ 2. Perfil dos Colaboradores
 elif escolha == "Perfil dos Colaboradores":
     st.title("Perfil dos Colaboradores")
-    st.caption("Cadastro (tbl_funcionarios) com os filtros da barra lateral, como no dashboard do VBA. "
+    st.caption("Cadastro com os filtros da barra lateral. "
                "Use o filtro «Estado» para ver só activos ou inactivos.")
     if F.empty:
         sem_dados()

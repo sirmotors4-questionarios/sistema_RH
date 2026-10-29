@@ -33,7 +33,7 @@ export async function callApi(action, {getToken, credenciais, params, fetchImpl 
   const pedido = {...(params || {}), action};
   if (credenciais) {
     if (!credenciais.email || !credenciais.chave) throw new ApiError('Inicie sessão com o seu e-mail e código de acesso.', 0, 'RH_AUTH');
-    if (!url) throw new ApiError('Falta o endereço do fluxo de acesso.', 0, 'RH_AUTH');
+    if (!url) throw new ApiError('Falta o endereço de acesso.', 0, 'RH_AUTH');
     pedido.email = credenciais.email;
     pedido.chave = credenciais.chave;
   } else {
@@ -44,21 +44,21 @@ export async function callApi(action, {getToken, credenciais, params, fetchImpl 
   try {
     response = await fetchImpl(url, {method: 'POST', headers, body: JSON.stringify(pedido)});
   } catch {
-    throw new ApiError('Não foi possível contactar o Power Automate. Verifique a ligação.', 0, 'RH_NETWORK');
+    throw new ApiError('Não foi possível contactar o servidor. Verifique a ligação.', 0, 'RH_NETWORK');
   }
   let body = null;
   try { body = await response.json(); } catch { body = null; }
   if (response.status === 401) throw new ApiError('Sessão Microsoft inválida ou expirada. Inicie sessão novamente.', 401, 'RH_AUTH');
   if (response.status === 403) {
     if (credenciais && body?.erro) throw new ApiError(body.erro, 403, 'RH_FORBIDDEN');
-    if (credenciais) throw new ApiError('E-mail ou código de acesso inválidos, ou conta não activa em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
+    if (credenciais) throw new ApiError('E-mail ou código de acesso inválidos, ou conta não activa.', 403, 'RH_FORBIDDEN');
     const quem = body?.email ? ' (' + body.email + ')' : '';
-    throw new ApiError('A sua conta' + quem + ' não está autorizada no Sistema RH. Peça a um Superadministrador para a registar em tbl_utilizadores_RH.', 403, 'RH_FORBIDDEN');
+    throw new ApiError('A sua conta' + quem + ' não está autorizada no Sistema RH. Peça acesso a um Superadministrador.', 403, 'RH_FORBIDDEN');
   }
   if (response.status === 400) throw new ApiError(body?.erro || 'Pedido inválido.', 400, 'RH_ACTION');
   if (!response.ok && body?.erro) throw new ApiError(body.erro, response.status, response.status === 409 ? 'RH_CONFLITO' : 'RH_NAO_ENCONTRADO');
   if (!response.ok || !body || body.ok !== true) {
-    throw new ApiError('O Power Automate devolveu uma resposta inválida (' + response.status + ').', response.status, 'RH_RESPONSE');
+    throw new ApiError('O servidor devolveu uma resposta inválida (' + response.status + ').', response.status, 'RH_RESPONSE');
   }
   return body;
 }
@@ -96,7 +96,7 @@ export async function loadModulo(action, deps = {}) {
     tabelas[item.tabela] = item.linhas.map(linha => ({...linha}));
   }
   const faltam = esperadas.filter(nome => !(nome in tabelas));
-  if (faltam.length) throw new ApiError('O fluxo não devolveu: ' + faltam.join(', ') + '.', 200, 'RH_RESPONSE');
+  if (faltam.length) throw new ApiError('Resposta incompleta: ' + faltam.join(', ') + '.', 200, 'RH_RESPONSE');
   const user = body.utilizador || {};
   return {
     utilizador: {nome: user.Nome || '', email: user.Email || '', empresa: user.Empresa || '', ...permissoes(user.Perfil), trocarCodigo: /^sim$/i.test(String(user.Trocar_Codigo ?? '').trim())},
@@ -148,7 +148,7 @@ export async function finalizarMes({ano, mes, mesNome, utilizador = '', agoraSer
 function resultadoScript(body) {
   let r = body?.resultado ?? body;
   if (typeof r === 'string') { try { r = JSON.parse(r); } catch { throw new ApiError('Resposta do script inválida.', 200, 'RH_RESPONSE'); } }
-  if (!r || r.ok !== true) throw new ApiError(r?.erro || 'O Excel recusou o pedido.', 409, 'RH_CONFLITO');
+  if (!r || r.ok !== true) throw new ApiError(r?.erro || 'O pedido foi recusado.', 409, 'RH_CONFLITO');
   return r;
 }
 const listaJson = v => { if (Array.isArray(v)) return v; try { const x = JSON.parse(v || '[]'); return Array.isArray(x) ? x : []; } catch { return []; } };
