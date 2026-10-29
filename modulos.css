@@ -307,3 +307,52 @@ th.num .th-ordem{flex-direction:row-reverse}
 .ad-resumo .rel-nota{margin-top:0}
 td.ad-pendente{color:#be2537;font-weight:700}
 @media(max-width:720px){.ad-alt{grid-template-columns:1fr 1fr}.ad-alt .ad-novo{grid-column:1/-1}}
+/* ---------- Ecrã de entrada ---------- */
+body.sem-sessao{overflow:hidden}
+.login-screen{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:24px 16px;overflow-y:auto;
+ background:radial-gradient(1200px 600px at 15% 10%,#2b3a4b 0,transparent 60%),radial-gradient(900px 500px at 100% 100%,#5a1622 0,transparent 55%),#182330}
+.login-screen[hidden]{display:none}
+.login-card{width:min(440px,100%);background:#fff;border-radius:18px;box-shadow:0 30px 80px #0008;padding:30px 30px 24px;color:#293a4c;animation:login-in .25s ease-out}
+@keyframes login-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.login-card{animation:none}}
+.login-brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.login-brand b{display:block;font-size:14px;letter-spacing:1.4px;color:#182330}
+.login-brand small{display:block;font-size:11px;color:#738092;margin-top:3px}
+.login-card h1{font-size:22px;letter-spacing:-.4px;margin:0 0 8px;color:#182330}
+.login-card .help{margin-bottom:16px}
+.login-card label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#4c5c6c;margin:0 0 14px}
+.login-card input{width:100%;border:1px solid #dce3eb;border-radius:9px;padding:12px;font-size:14px;color:#293a4c;background:#fff;min-height:44px}
+.login-card input:focus{border-color:#be2537;outline:3px solid #f4c6cc;outline-offset:0}
+.login-pass{position:relative;display:block}
+.login-pass input{padding-right:78px}
+.login-pass .link-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px}
+.login-actions{display:flex;align-items:center;gap:10px;margin-top:6px}
+.login-actions .link-btn{margin-right:auto}
+.login-actions .primary{min-width:140px;padding:12px 18px;font-size:13px}
+.login-ms{width:100%;margin-top:14px}
+.login-esqueci{margin:16px 0 0;text-align:center}
+.login-ok{background:#eaf8ef;color:#1f6b3c;border-radius:8px;padding:10px 12px;font-size:12px;margin:0 0 14px}
+@media(max-width:480px){.login-card{padding:24px 18px 20px;border-radius:14px}.login-actions{flex-wrap:wrap}.login-actions .primary{flex:1}}
+/* ---------- Acessos ---------- */
+.ac-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-end}
+.ac-filtros{display:flex;gap:8px;flex-wrap:wrap}
+.ac-filtros input,.ac-filtros select,.ac-linha input,.ac-grid input,.ac-grid select{border:1px solid #dce3eb;border-radius:8px;padding:10px;background:#fff;color:#293a4c;min-height:40px;min-width:0}
+.ac-filtros input{width:220px;max-width:100%}
+.ac-aviso{margin:16px 24px 0;border:1px solid #f0d49a;background:#fffaf0;border-radius:10px;padding:12px 14px}
+.ac-aviso p{margin:0 0 8px;font-size:12px}
+.ac-linha{display:flex;gap:8px;align-items:center}
+.ac-linha input{flex:1}
+.ac-perfis{margin-top:20px}
+dialog#ac-dlg,dialog#ac-feito{border:0;border-radius:14px;padding:0;width:min(560px,calc(100vw - 32px));box-shadow:0 20px 60px #0f1b2a40;color:#293a4c}
+dialog#ac-dlg::backdrop,dialog#ac-feito::backdrop{background:#0f1b2a80}
+#ac-form,.ac-feito{padding:24px}
+#ac-form h2,.ac-feito h2{margin:0 0 16px;font-size:18px}
+.ac-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-bottom:14px}
+.ac-grid label,.ac-feito label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#4c5c6c}
+.ac-feito label{margin-bottom:12px}
+.ac-grid input:read-only{background:#f3f5f7;color:#6b7988}
+.ac-codigo{border:1px dashed #dce3ea;border-radius:10px;padding:12px;margin-bottom:12px}
+.ac-codigo>label{display:flex;gap:8px;align-items:center;font-size:12px;font-weight:700;margin-bottom:8px}
+#ac-codigo,#ac-feito-codigo{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px}
+@media(max-width:560px){.ac-grid{grid-template-columns:1fr}}
+.login-card #access-form{padding:0;gap:0;display:block}

@@ -4,8 +4,9 @@ import {iniciarIndemnizacoes} from "./indemnizacoes-ui.js";
 import * as AD from "./adendas-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
-import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
-import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
+import {iniciarAcessos} from "./acessos-ui.js";
+import {loadModulo, loadConfiguracoes, acessoTrocar, acessosListar, acessosGravar, acessosCodigo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
+import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO, actualizarChaveSessao, gerarCodigoTemporario, linkConfiguracao, lerConfiguracaoDoLink} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
@@ -21,7 +22,7 @@ const mockEmployees = [
 ];
 const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
-const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",indemnizacoes:"Indemnizações",relatorios:"Relatórios",configuracoes:"Configurações"};
+const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",indemnizacoes:"Indemnizações",relatorios:"Relatórios",acessos:"Acessos",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
 const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos","funcionarios"],salarios:["lancamentos","funcionarios"],ferias:["ferias"],indemnizacoes:["funcionarios"]};
 
@@ -44,6 +45,7 @@ function go(page,foco){
  if(page==="painel")painel.abrir();
  if(page==="relatorios")relatorios.abrir();
  if(page==="indemnizacoes")indemn.abrir();
+ if(page==="acessos"){if(ligado&&utilizadorActual?.perfil==="Superadministrador")acessosPag.abrir();else acessosPag.limpar()}
 }
 document.querySelectorAll("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.go,el.dataset.foco)));
@@ -431,9 +433,11 @@ function mostrarUtilizador(u){
  $("avatar").textContent=(u.nome||u.email||"RH").split(/\s+/).map(p=>p[0]).join("").slice(0,2).toUpperCase();
  $("avatar").title=(u.nome||u.email)+" · "+u.perfil;
  $("source-sub").textContent=u.perfil+(u.propor?"":" · só consulta");
+ $("nav-acessos").hidden=!(sessaoAcesso()&&u.perfil==="Superadministrador");
+ if(u.trocarCodigo&&sessaoAcesso()&&ecra.hidden)abrirTroca("obrigatoria");
 }
 function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAcesso());
- $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);
+ $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);$("trocar-codigo").hidden=!codigo;
  document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
 function ligar(quem,via){
  ligado=true;botoes();
@@ -446,42 +450,75 @@ function ligar(quem,via){
 }
 function desligar(){
  painel.limpar();relatorios.limpar();indemn.limpar();cacheIndemn=null;
- ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();
+ ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();$("nav-acessos").hidden=true;if(paginaActual==="acessos")go("dashboard");
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
  ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
  if(ficha.aberta())document.getElementById("ficha").close();
  render();
 }
-// Diálogo de acesso por código
-const dlg=$("access-dialog");
-function mostrarCampoUrl(mostrar){$("access-url-field").hidden=!mostrar;$("access-change-url").hidden=mostrar}
+// ---------- Ecrã de entrada (código de acesso pessoal, fluxo RH_API_Acesso) ----------
+// O login é confirmado logo no Excel (acção "configuracoes", a mais leve). Com Trocar_Codigo = Sim (código
+// temporário definido pelo Superadministrador) o utilizador tem de escolher o seu código antes de continuar.
+const ecra=$("login-screen");let modoTroca=null; // null | "obrigatoria" | "voluntaria"
+function mostrarCampoUrl(mostrar){$("access-url-field").hidden=!mostrar;$("access-change-url").hidden=mostrar||Boolean(modoTroca)}
+function passo(troca){
+ modoTroca=troca;$("login-passo-entrar").hidden=Boolean(troca);$("login-passo-trocar").hidden=!troca;
+ $("troca-actual-campo").hidden=troca!=="voluntaria";$("troca-cancelar").hidden=troca!=="voluntaria";
+ $("troca-title").textContent=troca==="voluntaria"?"Alterar o código de acesso":"Definir o seu código de acesso";
+ $("troca-intro").textContent=troca==="voluntaria"?"Escreva o código actual e o novo (pelo menos "+CODIGO_MINIMO+" caracteres).":"Está a usar um código temporário. Escolha agora um código pessoal (pelo menos "+CODIGO_MINIMO+" caracteres) que só você conheça.";
+ $("access-submit").textContent=troca?"Guardar novo código":"Entrar";
+ $("login-ms").hidden=Boolean(troca)||!authConfigured();$("access-change-url").hidden=Boolean(troca)||$("access-url-field").hidden===false;
+ document.querySelector(".login-esqueci").hidden=Boolean(troca);
+ ["troca-actual","troca-novo","troca-confirmar"].forEach(id=>$(id).value="");
+}
 function abrirAcesso(erro=""){
- mostrarCampoUrl(!urlGuardada());$("access-error").textContent=erro;$("access-code").value="";$("access-key").textContent="";
- if(typeof dlg.showModal==="function")dlg.showModal();else dlg.setAttribute("open","");
+ passo(null);mostrarCampoUrl(!urlGuardada());$("access-error").textContent=erro;$("access-code").value="";
+ ecra.hidden=false;document.body.classList.add("sem-sessao");
  ($("access-email").value?$("access-code"):$("access-email")).focus();
 }
-function fecharAcesso(){if(typeof dlg.close==="function")dlg.close();else dlg.removeAttribute("open")}
+function fecharAcesso(){ecra.hidden=true;document.body.classList.remove("sem-sessao")}
+function abrirTroca(modo){passo(modo);$("access-error").textContent="";ecra.hidden=false;document.body.classList.add("sem-sessao");$(modo==="voluntaria"?"troca-actual":"troca-novo").focus()}
+let entradaPendente=null; // {email} à espera da troca obrigatória
+async function entrar(){
+ const s=await entrarComCodigo({email:$("access-email").value,codigo:$("access-code").value,url:$("access-url-field").hidden?"":$("access-url").value});
+ let r;
+ try{r=await loadConfiguracoes({credenciais:s,url:urlGuardada()})}
+ catch(e){sairAcesso();throw e.code==="RH_FORBIDDEN"?Error("E-mail ou código de acesso errados, ou conta inactiva."):e}
+ $("access-code").value="";$("access-url").value="";$("login-config").hidden=true;
+ if(r.utilizador.trocarCodigo){entradaPendente={email:s.email};abrirTroca("obrigatoria");return}
+ concluirEntrada(s.email);
+}
+function concluirEntrada(email){fecharAcesso();entradaPendente=null;ligar(email,"código de acesso")}
+async function trocar(){
+ const s=sessaoAcesso();if(!s)throw Error("A sessão terminou. Entre de novo.");
+ const novo=$("troca-novo").value,conf=$("troca-confirmar").value;
+ if(!validarCodigo(novo))throw Error("O novo código tem de ter pelo menos "+CODIGO_MINIMO+" caracteres.");
+ if(novo!==conf)throw Error("A confirmação não coincide com o novo código.");
+ if(modoTroca==="voluntaria"&&await chaveAcesso(s.email,$("troca-actual").value)!==s.chave)throw Error("O código actual não está certo.");
+ const chaveNova=await chaveAcesso(s.email,novo);
+ if(chaveNova===s.chave)throw Error("O novo código tem de ser diferente do actual.");
+ if(!urlIndemnizacoes())throw Error("Este navegador não tem o endereço do fluxo de gestão (RH_API_Indemnizacoes). Abra o link de primeiro acesso enviado pelo Superadministrador.");
+ await acessoTrocar({chaveActual:s.chave,chaveNova},{credenciais:s,url:urlIndemnizacoes()});
+ actualizarChaveSessao(chaveNova);
+ showToast("Código de acesso alterado.");
+ if(modoTroca==="obrigatoria")concluirEntrada(s.email);else fecharAcesso();
+}
 $("code-signin").addEventListener("click",()=>abrirAcesso());
-$("access-cancel").addEventListener("click",fecharAcesso);
+$("trocar-codigo").addEventListener("click",()=>abrirTroca("voluntaria"));
+$("troca-cancelar").addEventListener("click",fecharAcesso);
 $("access-change-url").addEventListener("click",()=>{mostrarCampoUrl(true);$("access-url").focus()});
+$("login-ms").addEventListener("click",()=>signIn().catch(e=>{$("access-error").textContent=e.message}));
+document.querySelectorAll("[data-mostrar]").forEach(b=>b.addEventListener("click",()=>{const i=$(b.dataset.mostrar),v=i.type==="password";i.type=v?"text":"password";b.textContent=v?"Esconder":"Mostrar"}));
 $("access-form").addEventListener("submit",async ev=>{
- ev.preventDefault();const btn=$("access-submit");btn.disabled=true;$("access-error").textContent="";
- try{
-  const s=await entrarComCodigo({email:$("access-email").value,codigo:$("access-code").value,url:$("access-url").hidden?"":$("access-url").value});
-  $("access-code").value="";$("access-url").value="";
-  fecharAcesso();ligar(s.email,"código de acesso");
- }catch(e){$("access-error").textContent=e.message}
- finally{btn.disabled=false}
-});
-$("access-make-key").addEventListener("click",async()=>{
- const email=$("access-email").value,codigo=$("access-code").value;
- if(!validarEmail(email)||!validarCodigo(codigo)){$("access-error").textContent="Para gerar a chave, indique o e-mail e um código com pelo menos "+CODIGO_MINIMO+" caracteres.";return}
- $("access-error").textContent="";$("access-key").textContent=await chaveAcesso(email,codigo);
+ ev.preventDefault();const btn=$("access-submit");btn.disabled=true;$("access-error").textContent="";const t=btn.textContent;btn.textContent=modoTroca?"A guardar…":"A verificar…";
+ try{if(modoTroca)await trocar();else await entrar()}
+ catch(e){$("access-error").textContent=e.message}
+ finally{btn.disabled=false;btn.textContent=t}
 });
 $("signin").addEventListener("click",()=>signIn().catch(e=>estadoLigacao("error","Sessão não iniciada",e.message)));
 $("signout").addEventListener("click",()=>{
- if(sessaoAcesso()){sairAcesso();desligar();estadoLigacao("","Sessão terminada","Os números exibidos são fictícios. Entre com o seu código de acesso para ver os dados do Excel.");return}
+ if(sessaoAcesso()){sairAcesso();desligar();estadoLigacao("","Sessão terminada","Entre com o seu código de acesso para ver os dados do Excel.");abrirAcesso();return}
  signOut().catch(e=>estadoLigacao("error","Erro ao terminar sessão",e.message));
 });
 
@@ -608,16 +645,40 @@ $("btn-comparativo").addEventListener("click",()=>lanc.comparativo());
 $("btn-finalizar").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para finalizar o mês.");return}lanc.finalizar()});
 $("novo-mes").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para criar um novo mês.");return}lanc.novoMes()});
 
+// ---------- Acessos (só Superadministrador) ----------
+const acessosPag=iniciarAcessos({
+ temUrl:()=>Boolean(sessaoAcesso()&&urlIndemnizacoes()),
+ guardarUrl:url=>guardarUrlIndemnizacoes(url),
+ listar:()=>acessosListar({credenciais:sessaoAcesso(),url:urlIndemnizacoes()}),
+ gravar:u=>acessosGravar(u,{credenciais:sessaoAcesso(),url:urlIndemnizacoes()}),
+ codigo:p=>acessosCodigo(p,{credenciais:sessaoAcesso(),url:urlIndemnizacoes()}),
+ chave:(email,codigo)=>chaveAcesso(email,codigo),
+ gerarCodigo:()=>gerarCodigoTemporario(),
+ minimo:CODIGO_MINIMO,
+ eu:()=>sessaoAcesso()?.email||"",
+ empresas:()=>dados.funcionarios?[...new Set(linhas("funcionarios","tbl_funcionarios").map(f=>String(f.Empresa??"").trim()).filter(Boolean))].sort():[],
+ // Administradores recebem também o endereço de gravação (RH_API_Actualizar), se este navegador o tiver.
+ link:u=>linkConfiguracao(location.origin+location.pathname,{gravacao:/administrador/i.test(u.perfil),email:u.email}),
+ aviso:showToast
+});
 render();
 (async()=>{
+ // Link de primeiro acesso (#config=…): guarda os endereços dos fluxos neste navegador e limpa a barra de endereço.
+ try{
+  const c=lerConfiguracaoDoLink(location.hash);
+  if(c){history.replaceState(null,"",location.pathname);if(c.email)$("access-email").value=c.email;
+   $("login-config").hidden=false;$("login-config").textContent="Este navegador ficou configurado para o Sistema RH. Entre com o código que recebeu.";}
+ }catch(e){history.replaceState(null,"",location.pathname);$("access-error").textContent=e.message}
  const s=sessaoAcesso();
  if(s&&urlGuardada()){ligar(s.email,"código de acesso");return}
- if(location.hash==="#entrar"){history.replaceState(null,"",location.pathname);abrirAcesso()}
+ if(location.hash==="#entrar")history.replaceState(null,"",location.pathname);
  botoes();
- if(!authConfigured())return;
- try{
-  await initAuth();botoes();
-  const conta=currentAccount();
-  if(conta)ligar(conta.username,"conta Microsoft");
- }catch(e){estadoLigacao("error","Erro de autenticação",e.message)}
+ if(authConfigured()){
+  try{
+   await initAuth();botoes();
+   const conta=currentAccount();
+   if(conta){ligar(conta.username,"conta Microsoft");return}
+  }catch(e){estadoLigacao("error","Erro de autenticação",e.message)}
+ }
+ const erro=$("access-error").textContent;abrirAcesso(erro);
 })();

@@ -17,6 +17,11 @@
  * accao "escaloes" — dados.op "ler": devolve as definições; "gravar": substitui os escalões de UMA empresa
  *                    (cria a tabela se não existir); "aplicar": preenche a coluna Escalão da tbl_lançamento
  *                    num mês (dados: {ano, mesNome}), só nas linhas não finalizadas.
+ * Acessos (tbl_utilizadores_RH):
+ * accao "trocar"   — (acção acesso_trocar, qualquer perfil activo) troca o código do próprio utilizador:
+ *                    dados {chaveActual, chaveNova} ou {op:"estado"} para saber se tem de trocar.
+ * dados.modulo "acessos" — só Superadministrador: op "listar" (sem as chaves), "gravar" (criar/alterar
+ *                    utilizador) e "codigo" (definir código temporário: Trocar_Codigo = Sim).
  * Só apaga linhas da tbl_escaloes_lancamento (ao substituir os escalões da empresa gravada). Devolve um objecto simples (sem índices genéricos).
  */
 const FOLHA = "Indemnizacoes";
@@ -41,6 +46,7 @@ interface Resultado {
   listaIndemnizacoes?: string; listaPrestacoes?: string; // JSON das tabelas (accao "listar")
   ids?: string[]; numero?: number; aplicada?: boolean; preenchidas?: number; semCodigo?: number;
   listaEscaloes?: string; alteradas?: number; semEscalao?: number;
+  listaUtilizadores?: string; trocar?: boolean;
 }
 interface Alteracao { campo: string; novo: string; }
 interface Pedido {
@@ -53,6 +59,8 @@ interface Pedido {
   motivo?: string; dataAdenda?: string; inicio?: string; fim?: string; documento?: string;
   alteracoes?: Alteracao[]; aplicar?: boolean; ids?: string[];
   // escalões
+  // acessos
+  email?: string; perfil?: string; estado?: string; chave?: string; chaveActual?: string; chaveNova?: string; idUtilizador?: string;
   modulo?: string; op?: string; criterio?: string; faixas?: Faixa[]; ano?: number; mesNome?: string;
 }
 interface Faixa { escalao: string; inicio: number; }
@@ -62,6 +70,9 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
     const a = String(accao || "").trim().toLowerCase();
     let p: Pedido = {};
     if (dados && String(dados).trim()) p = JSON.parse(dados) as Pedido;
+    // "trocar" (acção acesso_trocar) é a única aceite pelo fluxo para qualquer perfil: só troca o código do próprio
+    // utilizador e ignora tudo o resto do pedido (nunca chega aos outros módulos).
+    if (a === "trocar") return trocarCodigo(workbook, p, utilizador);
     if (a === "preparar") return preparar(workbook);
     if (a === "chaves") return preencherChaves(workbook);
     if (a === "registar") return registarAdenda(workbook, p, utilizador);
@@ -69,6 +80,7 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
     if (a === "revogar") return revogarAdendas(workbook, p, utilizador);
     // Os escalões também chegam por qualquer acção já aceite pelo fluxo, com dados.modulo = "escaloes".
     if (a === "escaloes" || p.modulo === "escaloes") return escaloes(workbook, p, utilizador);
+    if (p.modulo === "acessos") return acessos(workbook, p, utilizador);
     const ind = workbook.getTable(T_IND), pre = workbook.getTable(T_PRE);
     if (!ind || !pre) return erro("As tabelas das indemnizações ainda não existem. Corra a acção «preparar».");
     if (a === "listar") return {ok: true, accao: a, listaIndemnizacoes: ler(ind), listaPrestacoes: ler(pre)};
@@ -589,4 +601,118 @@ function aplicarEscaloesMes(workbook: ExcelScript.Workbook, p: Pedido): Resultad
   if (!doMes) return erro("Não há lançamentos para esse mês.");
   if (alteradas) col.setValues(novos);
   return {ok: true, accao: "escaloes", alteradas, semEscalao};
+}
+
+// ---------- Acessos (tbl_utilizadores_RH) ----------
+const T_UTIL = "tbl_utilizadores_RH";
+const PERFIS_RH = ["Superadministrador", "Administrador RH", "Técnico RH", "Gestor"];
+const COL_UTIL_EXTRA = ["Trocar_Codigo", "Data Ultima Alteracao", "Utilizador Alteracao"];
+const HASH = /^[0-9a-f]{64}$/;
+
+function semAcento(v: string): string { return v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase(); }
+function perfilValido(v: string): string { const k = semAcento(v); for (const p of PERFIS_RH) if (semAcento(p) === k) return p; return ""; }
+function emailNorm(v: unknown): string { return String(v ?? "").trim().toLowerCase(); }
+
+// Acrescenta no fim da tabela as colunas de apoio que faltarem (não mexe nas existentes).
+function colunasUtilizadores(t: ExcelScript.Table) {
+  const cab = cabecalho(t);
+  for (const c of COL_UTIL_EXTRA) if (cab.indexOf(c) < 0) t.addColumn(-1, undefined, c);
+}
+interface Conta { i: number; email: string; perfil: string; activo: boolean; hash: string; }
+function contas(t: ExcelScript.Table): Conta[] {
+  const cab = cabecalho(t), iE = cab.indexOf("Email"), iP = cab.indexOf("Perfil"), iS = cab.indexOf("Estado"), iH = cab.indexOf("Codigo_Hash");
+  return dadosTabela(t).map((v, i) => ({i, email: emailNorm(v[iE]), perfil: perfilValido(textoCelula(v[iP])),
+    activo: semAcento(textoCelula(v[iS])) === "activo", hash: textoCelula(v[iH]).toLowerCase()})).filter(c => c.email !== "");
+}
+function definirCelulas(t: ExcelScript.Table, i: number, valores: { [k: string]: Celula }) {
+  const cab = cabecalho(t), linha = t.getRangeBetweenHeaderAndTotal().getRow(i);
+  Object.keys(valores).forEach(k => { const j = cab.indexOf(k); if (j >= 0) linha.getCell(0, j).setValue(valores[k]); });
+}
+
+function trocarCodigo(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const t = workbook.getTable(T_UTIL);
+  if (!t) return erro("Tabela tbl_utilizadores_RH não encontrada.");
+  const eu = emailNorm(utilizador), c = contas(t).filter(x => x.email === eu);
+  if (c.length !== 1 || !c[0].activo) return erro("Utilizador não encontrado ou inactivo.");
+  const cab = cabecalho(t), iT = cab.indexOf("Trocar_Codigo");
+  const trocar = iT >= 0 && semAcento(textoCelula(dadosTabela(t)[c[0].i][iT])) === "sim";
+  if (String(p.op || "") === "estado") return {ok: true, accao: "trocar", trocar};
+  const actual = String(p.chaveActual || "").toLowerCase(), nova = String(p.chaveNova || "").toLowerCase();
+  if (!HASH.test(actual) || actual !== c[0].hash) return erro("O código actual não está certo.");
+  if (!HASH.test(nova)) return erro("Novo código inválido.");
+  if (nova === actual) return erro("O novo código tem de ser diferente do actual.");
+  colunasUtilizadores(t);
+  definirCelulas(t, c[0].i, {"Codigo_Hash": nova, "Trocar_Codigo": "Não", "Data Ultima Alteracao": agoraSerie(), "Utilizador Alteracao": eu});
+  return {ok: true, accao: "trocar", trocar: false};
+}
+
+function acessos(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const t = workbook.getTable(T_UTIL);
+  if (!t) return erro("Tabela tbl_utilizadores_RH não encontrada.");
+  const eu = emailNorm(utilizador), lista = contas(t);
+  const quem = lista.filter(x => x.email === eu);
+  if (quem.length !== 1 || !quem[0].activo || quem[0].perfil !== "Superadministrador") return erro("Só um Superadministrador activo pode gerir acessos.");
+  const op = String(p.op || "listar");
+  if (op === "listar") return {ok: true, accao: "acessos", listaUtilizadores: listarUtilizadores(t)};
+  colunasUtilizadores(t);
+  if (op === "codigo") {
+    const alvo = lista.filter(x => x.email === emailNorm(p.email));
+    if (alvo.length !== 1) return erro("Utilizador não encontrado.");
+    const chave = String(p.chave || "").toLowerCase();
+    if (!HASH.test(chave)) return erro("Chave do código temporário inválida.");
+    const proprio = alvo[0].email === eu;
+    definirCelulas(t, alvo[0].i, {"Codigo_Hash": chave, "Trocar_Codigo": proprio ? "Não" : "Sim", "Data Ultima Alteracao": agoraSerie(), "Utilizador Alteracao": eu});
+    return {ok: true, accao: "acessos", listaUtilizadores: listarUtilizadores(t)};
+  }
+  if (op === "gravar") return gravarUtilizador(t, lista, p, eu);
+  return erro("Operação de acessos desconhecida: " + op);
+}
+
+function listarUtilizadores(t: ExcelScript.Table): string {
+  const cab = cabecalho(t);
+  const out: { [k: string]: Celula }[] = [];
+  dadosTabela(t).filter(v => !vazia(v)).forEach(v => {
+    const o: { [k: string]: Celula } = {};
+    cab.forEach((h, j) => { if (h !== "Codigo_Hash") o[h] = v[j]; });
+    o["Tem_Codigo"] = HASH.test(textoCelula(v[cab.indexOf("Codigo_Hash")]).toLowerCase());
+    out.push(o);
+  });
+  return JSON.stringify(out);
+}
+
+function gravarUtilizador(t: ExcelScript.Table, lista: Conta[], p: Pedido, eu: string): Resultado {
+  const erros: string[] = [];
+  const email = emailNorm(p.email), nome = String(p.nome || "").trim(), perfil = perfilValido(String(p.perfil || ""));
+  const estado = semAcento(String(p.estado || "Activo")) === "inactivo" ? "Inactivo" : "Activo";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) erros.push("E-mail inválido.");
+  if (!nome) erros.push("Indique o nome.");
+  if (!perfil) erros.push("Perfil inválido.");
+  const existente = lista.filter(x => x.email === email);
+  if (existente.length > 1) erros.push("Este e-mail está repetido na tbl_utilizadores_RH.");
+  const novo = existente.length === 0;
+  const chave = String(p.chave || "").toLowerCase();
+  if (novo && !HASH.test(chave)) erros.push("Defina o código temporário do novo utilizador.");
+  if (!novo && existente[0].email === eu && (perfil !== "Superadministrador" || estado !== "Activo"))
+    erros.push("Não pode retirar o seu próprio acesso de Superadministrador.");
+  // Tem de ficar pelo menos um Superadministrador activo.
+  const restantes = lista.filter(x => x.email !== email && x.activo && x.perfil === "Superadministrador").length;
+  if (!novo && restantes === 0 && (perfil !== "Superadministrador" || estado !== "Activo")) erros.push("Tem de existir pelo menos um Superadministrador activo.");
+  if (erros.length) return {ok: false, accao: "acessos", erro: erros.join(" "), erros};
+  const agora = agoraSerie();
+  const valores: { [k: string]: Celula } = {"Nome": nome, "Email": email, "Perfil": perfil, "Empresa": String(p.empresa || "").trim(),
+    "Estado": estado, "Data Ultima Alteracao": agora, "Utilizador Alteracao": eu};
+  if (novo) {
+    const cab = cabecalho(t), iId = cab.indexOf("ID_Utilizador");
+    let maior = 0;
+    dadosTabela(t).forEach(v => { const m = /(\d+)\s*$/.exec(textoCelula(v[iId])); if (m) maior = Math.max(maior, Number(m[1])); });
+    const prefixo = (() => { const v = dadosTabela(t).map(x => textoCelula(x[iId])).find(x => x !== ""); const m = v ? /^(.*?)(\d+)$/.exec(v) : null; return m ? m[1] : "U"; })();
+    valores["ID_Utilizador"] = prefixo + String(maior + 1).padStart(3, "0");
+    valores["Codigo_Hash"] = chave;
+    valores["Trocar_Codigo"] = "Sim";
+    limparFiltro(t);
+    inserir(t, [linhaPorCabecalho(t, valores)]);
+  } else {
+    definirCelulas(t, existente[0].i, valores);
+  }
+  return {ok: true, accao: "acessos", listaUtilizadores: listarUtilizadores(t)};
 }
