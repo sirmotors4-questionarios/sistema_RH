@@ -74,3 +74,12 @@ test('loadModulo rejeita módulo desconhecido, tabelas em falta e 400', async ()
   await assert.rejects(loadModulo('contratos', {getToken, fetchImpl: resposta(200, {ok: true, tabelas: [{tabela: 'tbl_adendas', linhas: []}]}), url: 'u'}), /tbl_parametros_pagamento/);
   await assert.rejects(loadModulo('ferias', {getToken, fetchImpl: resposta(400, {ok: false, erro: 'Accao invalida.'}), url: 'u'}), e => e.code === 'RH_ACTION' && /invalida/.test(e.message));
 });
+
+test('colaboradoresChaves pede o modo chaves e devolve as contagens', async () => {
+  const {colaboradoresChaves} = await import('../rh-api.js');
+  let enviado = null;
+  const fetchImpl = async (url, init) => { enviado = JSON.parse(init.body); return resposta(200, {ok: true, accao: 'chaves', preenchidas: 384, semCodigo: 76})(); };
+  const r = await colaboradoresChaves({getToken, fetchImpl, url: 'https://exemplo.test/fluxo'});
+  assert.equal(enviado.action, 'colaboradores_chaves');
+  assert.deepEqual(r, {preenchidas: 384, semCodigo: 76});
+});
