@@ -23,11 +23,11 @@
     <button class="nav-link" data-page="relatorios"><span>▥</span> Relatórios</button>
   </nav>
   <div class="nav-caption second">ADMINISTRAÇÃO</div>
-  <nav><button class="nav-link" data-page="configuracoes"><span>⚙</span> Configurações</button></nav>
+  <nav><button class="nav-link" data-page="acessos" id="nav-acessos" hidden><span>⚿</span> Acessos</button><button class="nav-link" data-page="configuracoes"><span>⚙</span> Configurações</button></nav>
   <div class="sidebar-footer"><div class="demo-dot" id="source-dot"></div><div><strong id="source-title">Modo demonstração</strong><small id="source-sub">Sem ligação ao SharePoint</small></div></div>
 </aside>
 <div class="main">
-<header class="topbar"><button id="menu-toggle" class="icon-btn menu-toggle" aria-label="Abrir menu">☰</button><div class="breadcrumb">SIR Grupo <span>/</span> <strong id="crumb">Visão geral</strong></div><div class="top-right"><span class="status-pill" id="status-pill">● Ambiente de demonstração</span><button class="primary small" id="code-signin" type="button">Entrar</button><button class="outline small" id="signin" type="button" hidden>Entrar com Microsoft</button><button class="outline small" id="signout" type="button" hidden>Terminar sessão</button><div class="avatar" id="avatar" title="">RH</div></div></header>
+<header class="topbar"><button id="menu-toggle" class="icon-btn menu-toggle" aria-label="Abrir menu">☰</button><div class="breadcrumb">SIR Grupo <span>/</span> <strong id="crumb">Visão geral</strong></div><div class="top-right"><span class="status-pill" id="status-pill">● Ambiente de demonstração</span><button class="primary small" id="code-signin" type="button">Entrar</button><button class="outline small" id="signin" type="button" hidden>Entrar com Microsoft</button><button class="outline small" id="trocar-codigo" type="button" hidden>Alterar código</button><button class="outline small" id="signout" type="button" hidden>Terminar sessão</button><div class="avatar" id="avatar" title="">RH</div></div></header>
 <main class="content">
 <section class="page active" id="dashboard">
 <div class="heading"><div><div class="eyebrow">PAINEL DE CONTROLO</div><h1>Visão geral</h1><p>Acompanhe os principais indicadores de recursos humanos.</p></div><div class="head-actions"><span class="badge muted" id="dash-badge">Dados ilustrativos</span></div></div>
@@ -62,20 +62,55 @@
 <div class="rel-mesa"><div class="rel-folha" id="rel-folha"></div></div>
 </div></div>
 </section>
-<section class="page" id="configuracoes"><div class="heading"><div><div class="eyebrow">ADMINISTRAÇÃO</div><h1>Configurações</h1><p>Parâmetros de pagamento, impostos e integração.</p></div></div><div class="panel"><div class="panel-head"><h2>Estado das fontes de dados</h2></div><div class="settings-row"><span>tbl_funcionarios</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_lançamento</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_adendas · tbl_ferias</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_parametros_pagamento · tbl_arredondamento</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_feriados · Table1 (IRPS)</span><b class="tag">Não ligado</b></div></div></section>
+<section class="page" id="acessos"><div class="heading"><div><div class="eyebrow">ADMINISTRAÇÃO</div><h1>Acessos</h1><p>Quem entra no Sistema RH, com que perfil e em que estado. Só o Superadministrador vê esta página.</p></div><button class="primary" id="ac-novo" type="button">+ Novo utilizador</button></div>
+<div class="panel"><div class="panel-head ac-head"><div><h2>Utilizadores</h2><p>tbl_utilizadores_RH · o código de cada pessoa nunca é mostrado: guarda-se só a chave calculada a partir dele.</p></div><div class="ac-filtros"><input id="ac-procurar" type="search" placeholder="Procurar nome ou e-mail" aria-label="Procurar utilizador"><select id="ac-estado" aria-label="Filtrar por estado"><option value="">Todos</option><option value="Activo">Activos</option><option value="Inactivo">Inactivos</option></select></div></div>
+<div class="ac-aviso" id="ac-ligacao" hidden><p>Para gerir acessos, cole uma vez o endereço do fluxo <b>RH_API_Indemnizacoes</b>.</p><div class="ac-linha"><input id="ac-url" type="password" autocomplete="off" placeholder="https://…/triggers/manual/…sig=…" aria-label="Endereço do fluxo RH_API_Indemnizacoes"><button class="primary" id="ac-url-guardar" type="button">Guardar</button></div></div>
+<div class="table-scroll"><table class="rows-click"><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Empresa</th><th>Estado</th><th>Código</th><th>Última alteração</th></tr></thead><tbody id="ac-body"></tbody></table></div>
+<div class="table-footer"><span id="ac-total">—</span><span id="ac-fonte"></span></div></div>
+<div class="cards-3 ac-perfis"><div class="info-card"><span>Superadministrador</span><p>Tudo, incluindo gerir acessos.</p></div><div class="info-card"><span>Administrador RH</span><p>Consulta e grava (colaboradores, lançamentos, adendas, indemnizações, escalões).</p></div><div class="info-card"><span>Técnico RH · Gestor</span><p>Só consulta.</p></div></div>
+</section><section class="page" id="configuracoes"><div class="heading"><div><div class="eyebrow">ADMINISTRAÇÃO</div><h1>Configurações</h1><p>Parâmetros de pagamento, impostos e integração.</p></div></div><div class="panel"><div class="panel-head"><h2>Estado das fontes de dados</h2></div><div class="settings-row"><span>tbl_funcionarios</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_lançamento</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_adendas · tbl_ferias</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_parametros_pagamento · tbl_arredondamento</span><b class="tag">Não ligado</b></div><div class="settings-row"><span>tbl_feriados · Table1 (IRPS)</span><b class="tag">Não ligado</b></div></div></section>
 </main></div></div>
-<dialog id="access-dialog" aria-labelledby="access-title">
-<form id="access-form" method="dialog" novalidate>
-<h2 id="access-title">Entrar no Sistema RH</h2>
-<p class="help">Use o e-mail registado em <code>tbl_utilizadores_RH</code> e o seu código de acesso pessoal. O código não sai deste navegador: só é enviada uma chave calculada a partir dele.</p>
+<div class="login-screen" id="login-screen" hidden role="dialog" aria-modal="true" aria-labelledby="login-title">
+<div class="login-card">
+<div class="login-brand"><div class="brand-mark">S</div><div><b>SIR GRUPO</b><small>Gestão de Recursos Humanos</small></div></div>
+<form id="access-form" novalidate>
+<div id="login-passo-entrar">
+<h1 id="login-title">Entrar no Sistema RH</h1>
+<p class="help">Use o e-mail registado e o seu código de acesso pessoal. O código não sai deste navegador: só é enviada uma chave calculada a partir dele.</p>
+<p class="login-ok" id="login-config" hidden></p>
 <label>E-mail<input id="access-email" type="email" autocomplete="username" required></label>
-<label>Código de acesso<input id="access-code" type="password" autocomplete="current-password" minlength="8" required></label>
-<div id="access-url-field"><label>Endereço do fluxo RH_API_Acesso<input id="access-url" type="url" autocomplete="off" placeholder="https://…powerplatform.com/…&amp;sig=…"></label><p class="help">Pedido ao administrador e colado uma única vez. Fica guardado só neste navegador.</p></div>
+<label>Código de acesso<span class="login-pass"><input id="access-code" type="password" autocomplete="current-password" minlength="8" required><button class="link-btn" type="button" data-mostrar="access-code" aria-label="Mostrar código">Mostrar</button></span></label>
+<div id="access-url-field"><label>Endereço do fluxo RH_API_Acesso<input id="access-url" type="url" autocomplete="off" placeholder="https://…powerplatform.com/…&amp;sig=…"></label><p class="help">Não tem? Peça ao Superadministrador o <b>link de primeiro acesso</b>: ao abri-lo, os endereços ficam configurados.</p></div>
+</div>
+<div id="login-passo-trocar" hidden>
+<h1 id="troca-title">Definir o seu código de acesso</h1>
+<p class="help" id="troca-intro">Está a usar um código temporário. Escolha agora um código pessoal (pelo menos 8 caracteres) que só você conheça.</p>
+<label id="troca-actual-campo" hidden>Código actual<input id="troca-actual" type="password" autocomplete="current-password"></label>
+<label>Novo código<span class="login-pass"><input id="troca-novo" type="password" autocomplete="new-password" minlength="8"><button class="link-btn" type="button" data-mostrar="troca-novo" aria-label="Mostrar código">Mostrar</button></span></label>
+<label>Confirmar novo código<input id="troca-confirmar" type="password" autocomplete="new-password" minlength="8"></label>
+</div>
 <p id="access-error" class="form-error" role="alert"></p>
-<div class="dialog-actions"><button class="link-btn" id="access-change-url" type="button">Alterar endereço do fluxo</button><span></span><button class="outline" id="access-cancel" type="button">Cancelar</button><button class="primary" id="access-submit" type="submit">Entrar</button></div>
-<details class="key-help"><summary>Primeiro acesso: gerar a chave para registo</summary><p class="help">Escreva acima o e-mail e o código que quer usar e carregue em «Gerar chave». Envie a chave ao administrador para a colar na coluna <code>Codigo_Hash</code> da sua linha. A chave não revela o código.</p><button class="outline" id="access-make-key" type="button">Gerar chave</button><output id="access-key" class="key-out"></output></details>
+<div class="login-actions"><button class="link-btn" id="access-change-url" type="button">Alterar endereço do fluxo</button><button class="outline" id="troca-cancelar" type="button" hidden>Cancelar</button><button class="primary" id="access-submit" type="submit">Entrar</button></div>
+<button class="outline login-ms" id="login-ms" type="button" hidden>Entrar com conta Microsoft</button>
+<p class="help login-esqueci">Esqueceu o código? Peça ao Superadministrador um código temporário.</p>
 </form>
-</dialog>
+</div>
+</div><dialog id="ac-dlg" aria-labelledby="ac-dlg-title"><form id="ac-form" novalidate>
+<h2 id="ac-dlg-title">Novo utilizador</h2>
+<div class="ac-grid"><label>Nome<input id="ac-nome" autocomplete="off" required></label><label>E-mail<input id="ac-email" type="email" autocomplete="off" required></label>
+<label>Perfil<select id="ac-perfil"><option>Gestor</option><option>Técnico RH</option><option>Administrador RH</option><option>Superadministrador</option></select></label>
+<label>Empresa<input id="ac-empresa" list="ac-empresas" autocomplete="off" placeholder="Opcional"></label>
+<label id="ac-estado-campo">Estado<select id="ac-estado-dlg"><option>Activo</option><option>Inactivo</option></select></label></div>
+<datalist id="ac-empresas"></datalist>
+<div class="ac-codigo" id="ac-codigo-bloco"><label><input type="checkbox" id="ac-novo-codigo"> Definir um código temporário</label><div id="ac-codigo-campos"><div class="ac-linha"><input id="ac-codigo" autocomplete="off" aria-label="Código temporário" spellcheck="false"><button class="outline" id="ac-gerar" type="button">Gerar outro</button></div><p class="help">O utilizador é obrigado a trocá-lo no primeiro acesso. Envie-o por um canal diferente do link.</p></div></div>
+<p class="form-error" id="ac-erro" role="alert"></p>
+<div class="dialog-actions"><span></span><button class="outline" id="ac-cancelar" type="button">Cancelar</button><button class="primary" id="ac-gravar" type="submit">Gravar</button></div>
+</form></dialog>
+<dialog id="ac-feito" aria-labelledby="ac-feito-title"><div class="ac-feito"><h2 id="ac-feito-title">Acesso pronto</h2><p id="ac-feito-texto"></p>
+<label>Link de primeiro acesso<div class="ac-linha"><input id="ac-link" readonly><button class="outline" type="button" data-copiar="ac-link">Copiar</button></div></label>
+<label>Código temporário<div class="ac-linha"><input id="ac-feito-codigo" readonly spellcheck="false"><button class="outline" type="button" data-copiar="ac-feito-codigo">Copiar</button></div></label>
+<p class="help">O link leva os endereços dos fluxos (secretos): envie-o só à pessoa. O código não volta a ser mostrado.</p>
+<div class="dialog-actions"><span></span><button class="primary" id="ac-feito-fechar" type="button">Fechar</button></div></div></dialog>
 <dialog id="ficha" class="ficha" aria-labelledby="ficha-nome">
 <form id="ficha-form" novalidate>
 <header class="ficha-head"><div class="ficha-avatar" id="ficha-avatar">?</div><div class="ficha-title"><div class="ficha-meta"><span class="mode-pill" id="ficha-modo">Visualização</span><span class="state" id="ficha-estado" hidden></span></div><h2 id="ficha-nome">Colaborador</h2><p id="ficha-id"></p></div>

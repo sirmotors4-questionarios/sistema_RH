@@ -71,7 +71,7 @@ export async function loadConfiguracoes(deps = {}) {
   }
   const user = body.utilizador || {};
   return {
-    utilizador: {nome: user.Nome || '', email: user.Email || '', empresa: user.Empresa || '', ...permissoes(user.Perfil)},
+    utilizador: {nome: user.Nome || '', email: user.Email || '', empresa: user.Empresa || '', ...permissoes(user.Perfil), trocarCodigo: /^sim$/i.test(String(user.Trocar_Codigo ?? '').trim())},
     tables: readTables(body)
   };
 }
@@ -99,7 +99,7 @@ export async function loadModulo(action, deps = {}) {
   if (faltam.length) throw new ApiError('O fluxo não devolveu: ' + faltam.join(', ') + '.', 200, 'RH_RESPONSE');
   const user = body.utilizador || {};
   return {
-    utilizador: {nome: user.Nome || '', email: user.Email || '', empresa: user.Empresa || '', ...permissoes(user.Perfil)},
+    utilizador: {nome: user.Nome || '', email: user.Email || '', empresa: user.Empresa || '', ...permissoes(user.Perfil), trocarCodigo: /^sim$/i.test(String(user.Trocar_Codigo ?? '').trim())},
     action,
     tabelas
   };
@@ -182,6 +182,22 @@ export async function escaloesAplicarMes({ano, mesNome}, deps = {}) {
   const r = await escaloesPedido({op: 'aplicar', ano: Number(ano), mesNome}, deps);
   return {alteradas: Number(r.alteradas) || 0, semEscalao: Number(r.semEscalao) || 0};
 }
+// ---------- Acessos (tbl_utilizadores_RH) ----------
+// acesso_trocar: o próprio utilizador (qualquer perfil activo) vê se tem de trocar o código ou troca-o.
+export async function acessoEstado(deps = {}) {
+  const r = resultadoScript(await callApi('acesso_trocar', {...deps, params: {dados: JSON.stringify({op: 'estado'})}}));
+  return {trocar: r.trocar === true};
+}
+export async function acessoTrocar({chaveActual, chaveNova}, deps = {}) {
+  resultadoScript(await callApi('acesso_trocar', {...deps, params: {dados: JSON.stringify({chaveActual, chaveNova})}}));
+  return {ok: true};
+}
+// Gestão (só Superadministrador; o script confirma o perfil de quem pede).
+const acessosPedido = (dados, deps) => callApi('indemnizacoes_listar', {...deps, params: {dados: JSON.stringify({modulo: 'acessos', ...dados})}})
+  .then(resultadoScript).then(r => listaJson(r.listaUtilizadores));
+export const acessosListar = (deps = {}) => acessosPedido({op: 'listar'}, deps);
+export const acessosGravar = (u, deps = {}) => acessosPedido({op: 'gravar', ...u}, deps);
+export const acessosCodigo = ({email, chave}, deps = {}) => acessosPedido({op: 'codigo', email, chave}, deps);
 export async function adendaRegistar(pedido, deps = {}) {
   return resultadoScript(await callApi('adenda_registar', {...deps, params: {dados: JSON.stringify(pedido)}}));
 }

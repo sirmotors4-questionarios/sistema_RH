@@ -135,12 +135,13 @@ $("#load-remote").addEventListener("click",loadRemote);
 (async()=>{
  const s=sessaoAcesso();
  if(s&&urlGuardada()){authView("","Sessão iniciada: "+s.email+".");await loadRemote();return}
- if(!authConfigured()){authView("","Sessão não iniciada. Carregue em «Entrar» para usar o seu código de acesso, ou use o ficheiro JSON para testar.");return}
+ // Sem sessão, as Configurações não se mostram: vai para o ecrã de entrada da página principal.
+ if(!authConfigured()){location.replace("index.html");return}
  try{
   await initAuth();
   const account=currentAccount();
   if(account){authView("","Sessão iniciada: "+account.username+".");await loadRemote();}
-  else authView("","Inicie sessão com a conta Microsoft da SIR para carregar as configurações reais.");
+  else location.replace("index.html");
  }catch(error){authView("error",error.message);}
 })();
 

@@ -105,3 +105,41 @@ export function guardarUrlIndemnizacoes(url) {
   if (u === urlGuardada() || u === urlGravacao()) throw Error('Este endereço é de outro fluxo; cole o do RH_API_Indemnizacoes.');
   escrever('localStorage', KEY_URL_INDEMN, u);
 }
+
+// Troca do código na sessão aberta (depois de o Excel aceitar a nova chave).
+export function actualizarChaveSessao(chave) {
+  const s = sessaoAcesso();
+  if (!s || !/^[0-9a-f]{64}$/.test(String(chave))) return false;
+  return escrever('sessionStorage', KEY_SESSAO, JSON.stringify({...s, chave: String(chave)}));
+}
+
+// Código temporário aleatório (sem caracteres confundíveis: 0/O, 1/l/I).
+export function gerarCodigoTemporario(n = 10, rnd = globalThis.crypto) {
+  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const v = new Uint32Array(n);
+  rnd.getRandomValues(v);
+  return [...v].map(x => alfabeto[x % alfabeto.length]).join('');
+}
+
+// Link de primeiro acesso: leva os endereços dos fluxos no fragmento (#config=…), que o navegador não envia a
+// nenhum servidor. Ao abrir, a página guarda-os neste navegador e apaga o fragmento da barra de endereço.
+const b64url = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const deB64url = s => decodeURIComponent(escape(atob(String(s).replace(/-/g, '+').replace(/_/g, '/'))));
+export function linkConfiguracao(base, {gravacao = false, email = ''} = {}) {
+  const cfg = {a: urlGuardada(), i: urlIndemnizacoes()};
+  if (gravacao && urlGravacao()) cfg.g = urlGravacao();
+  if (email) cfg.e = normalizarEmail(email);
+  if (!cfg.a) throw Error('Este navegador não tem o endereço do fluxo RH_API_Acesso.');
+  return String(base).split('#')[0] + '#config=' + b64url(JSON.stringify(cfg));
+}
+export function lerConfiguracaoDoLink(hash) {
+  const m = /(?:^#|&)config=([A-Za-z0-9_-]+)/.exec(String(hash || ''));
+  if (!m) return null;
+  let cfg;
+  try { cfg = JSON.parse(deB64url(m[1])); } catch { throw Error('O link de acesso está incompleto ou foi alterado.'); }
+  const guardados = [];
+  if (cfg.a) { guardarUrl(cfg.a); guardados.push('acesso'); }
+  if (cfg.i && validarUrl(cfg.i) && cfg.i !== cfg.a) { escrever('localStorage', KEY_URL_INDEMN, String(cfg.i).trim()); guardados.push('gestão'); }
+  if (cfg.g && validarUrl(cfg.g) && cfg.g !== cfg.a) { escrever('localStorage', KEY_URL_GRAVAR, String(cfg.g).trim()); guardados.push('gravação'); }
+  return {guardados, email: validarEmail(cfg.e) ? normalizarEmail(cfg.e) : ''};
+}
