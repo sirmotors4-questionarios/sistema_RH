@@ -79,7 +79,7 @@ test('gravarColaborador envia modo e dados; 409 vira erro legível; URL de grava
   const conflito = async () => ({status: 409, ok: false, json: async () => ({ok: false, erro: 'Ja existe um colaborador com este codigo.'})});
   await assert.rejects(gravarColaborador('criar', {alvo, dados: {}}, {credenciais, url: URL_OK, fetchImpl: conflito}), e => e.code === 'RH_CONFLITO' && /Ja existe/.test(e.message));
   await assert.rejects(gravarColaborador('apagar', {}, {credenciais, url: URL_OK, fetchImpl: ok}), e => e.code === 'RH_ACTION');
-  assert.throws(() => A.guardarUrlGravacao(URL_OK), /consulta/);
+  assert.throws(() => A.guardarUrlGravacao(URL_OK), /endereço de acesso/);
   A.guardarUrlGravacao(URL_OK.replace('TESTE', 'GRAVAR'));
   assert.equal(A.urlGravacao(), URL_OK.replace('TESTE', 'GRAVAR'));
 });

@@ -33,7 +33,7 @@ export function iniciarIndemnizacoes(ctx) {
     if (!ctx.temUrl()) { mostrarVazio(true); return; }
     if (dados && !forcar) { render(); return; }
     if (aCarregar) return aCarregar;
-    $("ind-badge").textContent = "A ler o Excel…";
+    $("ind-badge").textContent = "A carregar…";
     const t0 = Date.now();
     aCarregar = indemnizacoesListar(deps()).then(r => {
       dados = {lista: I.indemnizacoes(r.indemnizacoes), prest: I.prestacoes(r.prestacoes), lido: new Date()};
@@ -51,7 +51,7 @@ export function iniciarIndemnizacoes(ctx) {
     document.querySelectorAll('[data-loaded="indemnizacoes"]').forEach(x => { x.hidden = true; });
     $("ind-url-box").hidden = !(ctx.ligado() && pedirUrl);
     $("ind-vazio-txt").textContent = txt || (!ctx.ligado() ? "Inicie sessão para consultar as indemnizações e os planos de pagamento."
-      : pedirUrl ? "Para ligar esta página ao Excel, cole uma vez o endereço do fluxo RH_API_Indemnizacoes." : "A carregar…");
+      : pedirUrl ? "Para ligar esta página, cole uma vez o endereço de gestão." : "A carregar…");
   }
 
   // ---------- render ----------
@@ -203,7 +203,7 @@ export function iniciarIndemnizacoes(ctx) {
     if (!podeGravar()) return;
     if (!confirmarAnular(i)) return;
     await indemnizacaoAnular({id: i.id, observacoes: "Anulada por " + ctx.utilizador()}, deps());
-    i.estado = "Anulada"; fechar(); render(); ctx.aviso("Plano " + i.id + " anulado (as linhas ficam no Excel como histórico).");
+    i.estado = "Anulada"; fechar(); render(); ctx.aviso("Plano " + i.id + " anulado (os registos ficam como histórico).");
   }
   // Confirmação no próprio diálogo (sem janelas do navegador).
   let confirmacao = null;
@@ -281,7 +281,7 @@ export function iniciarIndemnizacoes(ctx) {
       el("label", {class: "ind-confirma"}, confirma, " Confirmo que é este o colaborador a indemnizar."),
       activo
         ? el("div", {class: "ind-saida"}, el("h3", {text: "Registar a saída"}),
-            el("p", {class: "rel-nota", text: "Ao continuar, a ficha passa a Inactivo com esta data e motivo (gravado na tbl_funcionarios). A indemnização conta os anos até à data de saída."}),
+            el("p", {class: "rel-nota", text: "Ao continuar, a ficha passa a Inactivo com esta data e motivo. A indemnização conta os anos até à data de saída."}),
             el("div", {class: "ind-form"}, campo("Data de saída", fData), campo("Motivo da saída", fMotivo), lOutro))
         : el("div", {class: "ind-saida"},
             el("p", {class: "rel-nota", text: c.saida ? "Saída registada em " + dataPt(c.saida) + (c.motivo ? " · motivo: " + c.motivo : "") + ". Os anos de trabalho contam até essa data."

@@ -118,7 +118,7 @@ export function relatorioSalarial({lancMes, lancAnterior, ano, mes, empresa = ""
     : "Todos os lançamentos do mês estão finalizados."],
     tabela: {cols: [{t: "Estado do lançamento"}, {t: "Lançamentos", num: true}, {t: "% do total", num: true}],
       linhas: estados.sort((a, b) => b.n - a.n).map(g => [g.chave, int(g.n), pct(g.n, L.length)])}});
-  r.notas.push("Valores em meticais (MT). Vencimento, INSS, IRPS e líquido são os calculados pelas fórmulas do ficheiro Gestão de Colaboradores.xlsx.");
+  r.notas.push("Valores em meticais (MT). Vencimento, INSS, IRPS e líquido são os calculados pelo sistema.");
   return r;
 }
 
@@ -148,7 +148,7 @@ export function relatorioEncargos({lancMes, ano, mes, empresa = ""}) {
     linhas: [...L].sort((a, b) => a.empresa.localeCompare(b.empresa) || a.codigo.localeCompare(b.codigo))
       .map(l => [l.codigo, l.nome, l.empresa, mt(l.vencimento), mt(l.inss), mt(l.inssEmp), mt(l.irps)]),
     total: ["", "Total", "", mt(tot("vencimento")), mt(tot("inss")), mt(tot("inssEmp")), mt(tot("irps"))]}});
-  r.notas.push("Os valores de INSS e IRPS são os calculados pelas fórmulas do Excel; confirme as taxas em vigor antes da entrega.");
+  r.notas.push("Os valores de INSS e IRPS são os calculados pelo sistema; confirme as taxas em vigor antes da entrega.");
   return r;
 }
 
@@ -240,7 +240,7 @@ export function relatorioEfectivo({funcionarios, empresa = "", hoje}) {
     paragrafos: lista.length ? [] : ["Não há colaboradores activos em idade de reforma nem reformados."],
     tabela: lista.length ? {cols: [{t: "Código"}, {t: "Nome"}, {t: "Empresa"}, {t: "Departamento"}, {t: "Sexo"}, {t: "Idade", num: true}, {t: "Situação"}],
       linhas: lista.map(p => [p.codigo, p.nome, p.empresa, p.departamento, p.sexo || "—", p.idade ?? "—", p.sit])} : null});
-  r.notas.push("Idade de reforma considerada: 60 anos (homens) e 55 anos (mulheres), como no dashboard do sistema VBA.");
+  r.notas.push("Idade de reforma considerada: 60 anos (homens) e 55 anos (mulheres).");
   return r;
 }
 
@@ -279,7 +279,7 @@ export function relatorioMovimentacao({funcionarios, ano, empresa = "", efectivo
       linhas: sai.map(p => [fd(p.saida), p.codigo, p.nome, p.empresa, p.departamento,
         p.admissao ? (((new Date(p.saida) - new Date(p.admissao)) / 31557600000).toFixed(1).replace(".", ",") + " anos") : "—", p.motivo || "(Sem informação)"])} : null});
   if (sai.length) r.secoes.push({titulo: "5. Motivos de saída", tabela: tabelaContagem("Motivo", sai, p => p.motivo, sai.length)});
-  r.notas.push("Admissões e saídas segundo as datas de admissão e de saída registadas em tbl_funcionarios.");
+  r.notas.push("Admissões e saídas segundo as datas de admissão e de saída registadas no cadastro.");
   return r;
 }
 

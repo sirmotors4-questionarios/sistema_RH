@@ -72,9 +72,9 @@ export function iniciarAcessos(ctx) {
 
   async function carregar() {
     $("ac-ligacao").hidden = ctx.temUrl();
-    if (!ctx.temUrl()) { lista = []; $("ac-fonte").textContent = "Falta o endereço do fluxo RH_API_Indemnizacoes."; render(); return; }
+    if (!ctx.temUrl()) { lista = []; $("ac-fonte").textContent = "Falta o endereço de gestão."; render(); return; }
     aCarregar = true; render();
-    try { lista = utilizadores(await ctx.listar()); $("ac-fonte").textContent = "Lido do Excel às " + new Date().toLocaleTimeString("pt-MZ"); }
+    try { lista = utilizadores(await ctx.listar()); $("ac-fonte").textContent = "Actualizado às " + new Date().toLocaleTimeString("pt-MZ"); }
     catch (e) { lista = []; $("ac-fonte").textContent = ""; ctx.aviso("Não foi possível ler os acessos: " + e.message); }
     finally { aCarregar = false; render(); }
   }
@@ -126,7 +126,7 @@ export function iniciarAcessos(ctx) {
     finally { b.disabled = false; b.textContent = "Gravar"; }
   }
 
-  $("ac-novo").addEventListener("click", () => { if (!ctx.temUrl()) { ctx.aviso("Indique primeiro o endereço do fluxo RH_API_Indemnizacoes."); return; } abrirFicha(null); });
+  $("ac-novo").addEventListener("click", () => { if (!ctx.temUrl()) { ctx.aviso("Indique primeiro o endereço de gestão."); return; } abrirFicha(null); });
   $("ac-form").addEventListener("submit", gravar);
   $("ac-cancelar").addEventListener("click", () => fecharDlg(dlg));
   $("ac-novo-codigo").addEventListener("change", e => codigoCampos(e.target.checked));
