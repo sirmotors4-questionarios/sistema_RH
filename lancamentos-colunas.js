@@ -120,3 +120,29 @@ export function guardarPreferencias(pref, storage = globalThis.localStorage) {
 export function eDefault(pref) {
   return !pref.ordem && pref.colunas.length === PADRAO_IDS.length && pref.colunas.every((id, i) => id === PADRAO_IDS[i]);
 }
+
+// ---------- filtros no cabeçalho (como no Excel) ----------
+// filtros = {idColuna: [valores permitidos]} com os valores tal como aparecem na tabela (formatados); "" = vazias.
+// Sem entrada para a coluna = sem filtro nessa coluna.
+export const chaveFiltro = (col, l) => formatar(col, l);
+export function filtrarCabecalho(lista, filtros = {}, porId = new Map(), excepto = "") {
+  const activos = Object.entries(filtros).filter(([id, v]) => id !== excepto && Array.isArray(v) && porId.has(id))
+    .map(([id, v]) => [porId.get(id), new Set(v)]);
+  if (!activos.length) return lista;
+  return lista.filter(l => activos.every(([c, s]) => s.has(chaveFiltro(c, l))));
+}
+// Valores distintos de uma coluna, com contagem, por ordem natural (números pelo valor, datas pela data).
+export function valoresColuna(lista, col) {
+  const mapa = new Map();
+  for (const l of lista) {
+    const k = chaveFiltro(col, l);
+    const e = mapa.get(k);
+    if (e) e.n++; else mapa.set(k, {valor: k, n: 1, ord: chaveOrdenacao(col, l)});
+  }
+  const coll = new Intl.Collator("pt", {numeric: true, sensitivity: "base"});
+  return [...mapa.values()].sort((a, b) => {
+    if (a.ord === null || b.ord === null) return a.ord === b.ord ? 0 : a.ord === null ? 1 : -1;
+    return typeof a.ord === "number" && typeof b.ord === "number" ? a.ord - b.ord : coll.compare(String(a.ord), String(b.ord));
+  }).map(({valor, n}) => ({valor, n}));
+}
+export const filtrosActivos = filtros => Object.keys(filtros).filter(k => Array.isArray(filtros[k])).length;

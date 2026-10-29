@@ -356,3 +356,26 @@ dialog#ac-dlg::backdrop,dialog#ac-feito::backdrop{background:#0f1b2a80}
 #ac-codigo,#ac-feito-codigo{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px}
 @media(max-width:560px){.ac-grid{grid-template-columns:1fr}}
 .login-card #access-form{padding:0;gap:0;display:block}
+.grid-one{display:grid;grid-template-columns:1fr;gap:21px}.grid-one .quick-grid{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:900px){.grid-one .quick-grid{grid-template-columns:1fr 1fr}}@media(max-width:560px){.grid-one .quick-grid{grid-template-columns:1fr}}
+/* ---------- filtro no cabeçalho (lançamentos) ---------- */
+#pay-head th{white-space:nowrap}
+#pay-head th .th-ordem{display:inline-flex}
+.th-filtro{border:1px solid transparent;background:none;color:#9aa6b2;border-radius:5px;margin-left:4px;padding:1px 5px;font-size:11px;line-height:1.2;cursor:pointer;vertical-align:middle}
+.th-filtro:hover{border-color:#dce3eb;background:#fff;color:#364455}
+.th-filtro.activo{background:#be2537;border-color:#be2537;color:#fff}
+.filtro-cab{position:absolute;z-index:40;background:#fff;border:1px solid #dce3eb;border-radius:12px;box-shadow:0 16px 40px #0f1b2a33;padding:10px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:#293a4c}
+.fc-titulo{font-size:12px;padding:2px 6px 4px;color:#182330}
+.fc-ordem{display:flex;flex-direction:column;border-bottom:1px solid #eef1f5;padding-bottom:6px}
+.fc-op{border:0;background:none;text-align:left;padding:7px 8px;border-radius:7px;color:#364455;font-size:12px;cursor:pointer}
+.fc-op:hover:not(:disabled){background:#f4f6f9}
+.fc-op.activo{color:#be2537;font-weight:700}
+.fc-op:disabled{color:#b4bec8;cursor:default}
+.fc-procura{border:1px solid #dce3eb;border-radius:8px;padding:8px 10px;font-size:12px;min-height:34px}
+.fc-tudo{display:flex;gap:6px;align-items:center;padding:4px 6px;font-weight:700}
+.fc-lista{max-height:240px;overflow:auto;border:1px solid #eef1f5;border-radius:8px;padding:4px}
+.fc-lista label{display:flex;gap:6px;align-items:center;padding:4px 6px;border-radius:6px;cursor:pointer}
+.fc-lista label:hover{background:#f7f8fa}
+.fc-lista small{margin-left:auto;color:#9aa6b2;font-size:11px}
+.fc-lista .help{margin:6px}
+.fc-accoes{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}
+#pay-filtros-limpar{margin-left:10px;color:#be2537;font-size:12px}
