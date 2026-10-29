@@ -1,9 +1,11 @@
 import {evaluateFormula} from "./rh-engine.js";
 import {readTables, resolveTables, simulateRecord} from "./rh-data.js";
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
-import {loadConfiguracoes, loadModulo} from "./rh-api.js";
+import {loadConfiguracoes, loadModulo, escaloesLer, escaloesGravar, escaloesAplicarMes} from "./rh-api.js";
+import * as ESC from "./escaloes.js";
+import {NOME_MES} from "./rh-modulos.js";
 import {contarTiposContrato} from "./tipos-contrato.js";
-import {sessaoAcesso, urlGuardada, sairAcesso} from "./rh-acesso.js";
+import {sessaoAcesso, urlGuardada, sairAcesso, urlIndemnizacoes, guardarUrlIndemnizacoes} from "./rh-acesso.js";
 "use strict";
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const nav=$$(".config-nav");
@@ -18,7 +20,7 @@ function scope(){let n=["geral","empresa","categoria","colaborador"].indexOf(lev
 level.addEventListener("change",scope);scope();
 let tables=null, sourceError="", sourceLabel="", utilizador=null;
 let dirty=false;function markDirty(){dirty=true;$("#dirty").textContent="Alterações por validar";$("#dirty").style.background="#fff1dc";$("#dirty").style.color="#926320";$("#sim-result").dataset.validated="false"}
-$$(".config-work input,.config-work select").forEach(el=>el.addEventListener("input",markDirty));
+$$(".config-work input:not([data-livre]),.config-work select:not([data-livre])").forEach(el=>el.addEventListener("input",markDirty));
 const scales=$("#scales-body");
 function addScale(){let tr=document.createElement("tr");for(let i=0;i<8;i++){let td=document.createElement("td"),input=document.createElement("input");input.type="number";input.step="0.01";input.min="0";input.setAttribute("aria-label",["Limite inferior","Limite superior","Dependentes 0","Dependentes 1","Dependentes 2","Dependentes 3","Dependentes 4 ou mais","Coeficiente adicional"][i]);input.addEventListener("input",markDirty);td.append(input);tr.append(td)}scales.append(tr);markDirty()}
 $("#add-scale").addEventListener("click",addScale);
@@ -122,7 +124,7 @@ async function loadRemote(){
   $("#integration-badge").textContent="Motor ligado · Power Automate";
   $("#propose").disabled=!utilizador.propor;
   authView("ok",(utilizador.nome||utilizador.email)+" · Perfil: "+utilizador.perfil+(utilizador.propor?"":" (apenas consulta)")+". Configurações carregadas.");
-  carregarTiposContrato();
+  carregarTiposContrato().then(carregarEscaloes);
  }catch(error){
   utilizador=null;authView("error",error.message);
  }finally{button.disabled=false;}
@@ -181,3 +183,113 @@ tcForm.addEventListener("submit",ev=>{
  tcForm.reset();tcForm.hidden=true;renderTiposContrato();
  toast("Tipo «"+nome+"» adicionado à lista como proposto. Ainda não foi gravado no Excel.");
 });
+
+// ---------- Escalões salariais (tbl_escaloes_lancamento, via RH_API_Indemnizacoes) ----------
+let escDefs=new Map(),escFaixas=[],escCarregado=false;
+const escTransp=()=>({credenciais:sessaoAcesso(),url:urlIndemnizacoes()});
+const escFmt=v=>v===null||v===undefined||v===""?"":new Intl.NumberFormat("pt-MZ",{minimumFractionDigits:2,maximumFractionDigits:2}).format(v);
+const escEstado=m=>{$("#esc-estado").textContent=m};
+(function iniciarEscaloes(){
+ const crit=$("#esc-criterio");ESC.CRITERIOS.forEach(c=>{const o=document.createElement("option");o.value=c.coluna;o.textContent=c.rotulo;crit.append(o)});
+ const mes=$("#esc-mes");NOME_MES.forEach((n,i)=>{const o=document.createElement("option");o.value=n;o.textContent=n;mes.append(o)});
+ const hoje=new Date();$("#esc-ano").value=String(hoje.getFullYear());mes.value=NOME_MES[hoje.getMonth()];
+ $("#esc-empresa").addEventListener("change",escMostrarEmpresa);
+ crit.addEventListener("change",escCalculos);
+ $("#esc-add").addEventListener("click",()=>{escLerTabela();const ult=escFaixas.length?Number(escFaixas[escFaixas.length-1].inicio)||0:0;escFaixas.push({escalao:"",inicio:escFaixas.length?ult+1000:0});escRender(true)});
+ $("#esc-repor").addEventListener("click",escMostrarEmpresa);
+ $("#esc-gravar").addEventListener("click",escGravar);
+ $("#esc-aplicar").addEventListener("click",escAplicar);
+ $("#esc-url-guardar").addEventListener("click",()=>{try{guardarUrlIndemnizacoes($("#esc-url").value);$("#esc-url").value="";carregarEscaloes()}catch(e){$("#esc-erro").textContent=e.message}});
+ {const o=document.createElement("option");o.value=ESC.TODAS;o.textContent="Todas as empresas";$("#esc-empresa").append(o)}
+ escRender();
+})();
+function escEmpresas(){
+ const nomes=new Map();(funcionarios||[]).forEach(f=>{const e=String(f.Empresa??"").trim();if(e)nomes.set(e.toUpperCase(),e)});
+ escDefs.forEach(d=>{if(d.empresa.toUpperCase()!==ESC.TODAS.toUpperCase())nomes.set(d.empresa.toUpperCase(),d.empresa)});
+ return [...nomes.values()].sort((a,b)=>a.localeCompare(b,"pt"));
+}
+async function carregarEscaloes(){
+ const sel=$("#esc-empresa"),actual=sel.value;
+ $("#esc-ligacao").hidden=Boolean(urlIndemnizacoes());
+ if(!sessaoAcesso()){escEstado("Inicie sessão com o código de acesso (página principal) para ler e gravar os escalões.");}
+ else if(!urlIndemnizacoes()){escEstado("Falta o endereço do fluxo RH_API_Indemnizacoes.");}
+ else{
+  escEstado("A ler os escalões do Excel…");
+  try{escDefs=ESC.agrupar(await escaloesLer(escTransp()));escCarregado=true;escEstado(escDefs.size?"Escalões lidos da tbl_escaloes_lancamento ("+new Date().toLocaleTimeString("pt-MZ")+").":"Ainda não há escalões gravados. Defina-os abaixo; a tabela é criada na primeira gravação.");}
+  catch(e){escEstado("Não foi possível ler os escalões: "+e.message);}
+ }
+ sel.replaceChildren();
+ const op=(v,t)=>{const o=document.createElement("option");o.value=v;o.textContent=t+(escDefs.has(v.toUpperCase())?" · com escalões":"");sel.append(o)};
+ op(ESC.TODAS,"Todas as empresas");escEmpresas().forEach(e=>op(e,e));
+ if([...sel.options].some(o=>o.value===actual))sel.value=actual;
+ escMostrarEmpresa();
+}
+function escMostrarEmpresa(){
+ const d=escDefs.get($("#esc-empresa").value.toUpperCase());
+ $("#esc-criterio").value=d?.criterio||ESC.CRITERIO_PADRAO;
+ escFaixas=d?d.faixas.map(f=>({...f})):[];
+ $("#esc-erro").textContent="";escRender();
+}
+function escLerTabela(){
+ escFaixas=[...$("#esc-body").querySelectorAll("tr[data-i]")].map(tr=>({escalao:tr.querySelector("[data-k=n]").value,inicio:tr.querySelector("[data-k=v]").value}));
+}
+// Simulação: a própria empresa; em «Todas», as empresas que não têm escalões próprios.
+function escActivos(){
+ const emp=$("#esc-empresa").value.toUpperCase(),todas=emp===ESC.TODAS.toUpperCase();
+ return (funcionarios||[]).filter(f=>{const e=String(f.Empresa??"").trim().toUpperCase();return /^activo$/i.test(String(f.Estado??"").trim())&&(todas?!escDefs.has(e):e===emp)});
+}
+// Desenha as linhas (só ao acrescentar, remover ou mudar de empresa); os cálculos actualizam-se no lugar,
+// para não perder o campo em que o utilizador está a escrever.
+function escRender(focar=false){
+ const body=$("#esc-body");body.replaceChildren();
+ if(!escFaixas.length){rowCells(body,["Sem escalões para esta empresa. Carregue em «+ Acrescentar escalão»."]);body.firstChild.firstChild.colSpan=5;$("#esc-sim").textContent="";return}
+ escFaixas.forEach((f,i)=>{
+  const tr=document.createElement("tr");tr.dataset.i=String(i);
+  const nome=document.createElement("input");nome.dataset.k="n";nome.value=f.escalao;nome.placeholder="Ex.: Escalão 1";nome.setAttribute("aria-label","Nome do escalão "+(i+1));
+  const val=document.createElement("input");val.dataset.k="v";val.type="number";val.step="0.01";val.min="0";val.value=f.inicio===null?"":String(f.inicio);val.setAttribute("aria-label","Valor inicial do escalão "+(i+1));
+  [nome,val].forEach(x=>x.addEventListener("input",()=>{escLerTabela();escCalculos()}));
+  [nome,val,document.createElement("span"),document.createElement("span")].forEach((c,j)=>{const td=document.createElement("td");if(j>=1)td.className="num";if(j===2)td.classList.add("esc-ate");td.append(c);tr.append(td)});
+  const td=document.createElement("td"),rm=document.createElement("button");rm.type="button";rm.className="esc-remover";rm.textContent="×";rm.title="Remover escalão";rm.setAttribute("aria-label","Remover escalão "+(i+1));
+  rm.addEventListener("click",()=>{escLerTabela();escFaixas.splice(i,1);escRender()});td.append(rm);tr.append(td);body.append(tr);
+ });
+ escCalculos();
+ if(focar){const ult=body.querySelector("tr:last-child [data-k=n]");ult&&ult.focus()}
+}
+function escCalculos(){
+ const validas=escFaixas.map(f=>({escalao:String(f.escalao).trim(),inicio:ESC.numero(f.inicio)})).filter(f=>f.escalao&&f.inicio!==null);
+ const activos=escActivos(),dist=ESC.distribuicao(validas,$("#esc-criterio").value,activos),conta=new Map(dist.porEscalao.map(x=>[x.escalao,x.total]));
+ const ate=new Map(ESC.intervalos(validas).map(x=>[x.escalao,x.ate]));
+ $("#esc-body").querySelectorAll("tr[data-i]").forEach(tr=>{
+  const n=tr.querySelector("[data-k=n]").value.trim(),cel=tr.querySelectorAll("td");
+  const a=ate.has(n)?ate.get(n):undefined;
+  cel[2].firstChild.textContent=a===undefined?"":a===null?"sem limite":"< "+escFmt(a);
+  cel[3].firstChild.textContent=funcionarios&&a!==undefined?String(conta.get(n)??0):"—";
+ });
+ $("#esc-sim").textContent=funcionarios?(activos.length+" activos na simulação"+(dist.abaixo?" · "+dist.abaixo+" abaixo do 1.º escalão":"")+(dist.semValor?" · "+dist.semValor+" sem valor no cadastro":"")):"";
+}
+function escPodeGravar(){
+ if(!sessaoAcesso()||!urlIndemnizacoes()){$("#esc-erro").textContent="Inicie sessão e indique o endereço do fluxo RH_API_Indemnizacoes.";return false}
+ if(utilizador&&!utilizador.propor){$("#esc-erro").textContent="O seu perfil ("+utilizador.perfil+") só permite consultar.";return false}
+ return true;
+}
+async function escGravar(){
+ escLerTabela();$("#esc-erro").textContent="";
+ const pedido={empresa:$("#esc-empresa").value,criterio:$("#esc-criterio").value,faixas:escFaixas};
+ const erros=ESC.validar(pedido);if(erros.length){$("#esc-erro").textContent=erros.join(" ");return}
+ if(!escPodeGravar())return;
+ const b=$("#esc-gravar");b.disabled=true;b.textContent="A gravar…";
+ try{const r=await escaloesGravar(ESC.pedidoGravacao(pedido),escTransp());escDefs=ESC.agrupar(r.linhas);toast(r.gravados+" escalões gravados para «"+(pedido.empresa===ESC.TODAS?"Todas as empresas":pedido.empresa)+"». Os próximos lançamentos já os usam.");await carregarEscaloes()}
+ catch(e){$("#esc-erro").textContent="Não foi gravado: "+e.message}
+ finally{b.disabled=false;b.textContent="Gravar escalões no Excel"}
+}
+async function escAplicar(){
+ $("#esc-erro").textContent="";
+ if(!escDefs.size){$("#esc-erro").textContent="Grave primeiro os escalões.";return}
+ if(!escPodeGravar())return;
+ const ano=Number($("#esc-ano").value),mesNome=$("#esc-mes").value;
+ if(!Number.isInteger(ano)||ano<2000){$("#esc-erro").textContent="Ano inválido.";return}
+ const b=$("#esc-aplicar");b.disabled=true;b.textContent="A aplicar…";
+ try{const r=await escaloesAplicarMes({ano,mesNome},escTransp());toast(mesNome+"/"+ano+": "+r.alteradas+" linhas actualizadas"+(r.semEscalao?" · "+r.semEscalao+" sem escalão (sem valor ou abaixo do 1.º)":"")+".")}
+ catch(e){$("#esc-erro").textContent="Não foi aplicado: "+e.message}
+ finally{b.disabled=false;b.textContent="Aplicar escalões ao mês"}
+}

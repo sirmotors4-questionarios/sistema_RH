@@ -7,6 +7,8 @@
  *                    recusa se estiver Finalizado; marca Estado do Lançamento = "Alterado".
  * modo "finalizar" — marca todas as linhas do mês como Finalizado / Revisto = Sim.
  * Nunca escreve nas 11 colunas calculadas (PROTEGIDAS). Valida tudo antes de escrever.
+ * Escalão: se existir tbl_escaloes_lancamento e a coluna "Escalão" (sem fórmula), o gravar preenche-a nas linhas
+ * novas e o editar recalcula-a, com o valor do critério da empresa (por omissão Salario Liquido) já recalculado.
  */
 interface Resultado {
   ok: boolean;
@@ -137,6 +139,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
       definir(i, p, v);
     }
     definir(i, "Estado do Lançamento", "Alterado");
+    preencherEscaloes(workbook, corpo, cab, i, 1);
     // Devolve a linha já recalculada (Vencimento, INSS, IRPS, Líquido…) para o site actualizar só esta linha.
     const valores = corpo.getRow(i).getValues()[0];
     const obj: { [k: string]: string | number | boolean } = {};
@@ -211,6 +214,44 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     novo.getColumn(j).setFormulasR1C1(actual.map((l, i) => [comFormula[i][j] ? formulasRef[j] : l[0]]));
   });
   r.inseridas = matriz.length;
+  preencherEscaloes(workbook, corpo, cab, nLinhas, matriz.length);
   r.ok = true;
   return fim();
+}
+
+// ---------- Escalões (mesma regra que o site e o script RHIndemnizacoes) ----------
+// Um escalão começa no seu Valor_Inicial (inclusive) e vai até ao início do seguinte; o último não tem limite.
+// A empresa "Todas" vale para as empresas sem escalões próprios. Sem tabela ou sem coluna, não faz nada.
+interface DefEscalao { criterio: string; faixas: { escalao: string; inicio: number }[]; }
+function preencherEscaloes(workbook: ExcelScript.Workbook, corpo: ExcelScript.Range, cab: string[], inicio: number, n: number) {
+  const j = cab.indexOf("Escalão");
+  const tEsc = workbook.getTable("tbl_escaloes_lancamento");
+  if (j < 0 || !tEsc || n <= 0 || tEsc.getRowCount() === 0) return;
+  const bloco = corpo.getWorksheet().getRangeByIndexes(corpo.getRowIndex() + inicio, corpo.getColumnIndex(), n, cab.length);
+  const colEsc = bloco.getColumn(j);
+  if (colEsc.getFormulas().some(f => String(f[0]).startsWith("="))) return;
+  const ce = tEsc.getHeaderRowRange().getValues()[0].map(v => String(v));
+  const iE = ce.indexOf("Empresa"), iC = ce.indexOf("Criterio"), iN = ce.indexOf("Escalao"), iV = ce.indexOf("Valor_Inicial");
+  const mapa = new Map<string, DefEscalao>();
+  for (const v of tEsc.getRangeBetweenHeaderAndTotal().getValues()) {
+    const e = String(v[iE] ?? "").trim().toUpperCase(), nome = String(v[iN] ?? "").trim(), x = Number(v[iV]);
+    if (!e || !nome || String(v[iV] ?? "").trim() === "" || !isFinite(x)) continue;
+    let d = mapa.get(e);
+    if (!d) { d = {criterio: String(v[iC] ?? "").trim() || "Salario Liquido", faixas: []}; mapa.set(e, d); }
+    d.faixas.push({escalao: nome, inicio: x});
+  }
+  if (!mapa.size) return;
+  mapa.forEach(d => d.faixas.sort((a, b) => a.inicio - b.inicio));
+  const valores = bloco.getValues();
+  const iEmp = cab.indexOf("Empresa");
+  colEsc.setValues(valores.map(l => {
+    const d = mapa.get(String(l[iEmp] ?? "").trim().toUpperCase()) || mapa.get("TODAS");
+    if (!d) return [""];
+    const k = cab.indexOf(d.criterio), bruto = k >= 0 ? l[k] : "";
+    const v = Number(bruto);
+    if (bruto === "" || bruto === null || !isFinite(v)) return [""];
+    let r = "";
+    for (const f of d.faixas) if (v >= f.inicio) r = f.escalao;
+    return [r];
+  }));
 }
