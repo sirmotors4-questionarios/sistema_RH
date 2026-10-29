@@ -162,6 +162,15 @@ export async function indemnizacaoGravar(pedido, deps = {}) {
 export async function prestacaoPagar({id, paga = true, data = ''}, deps = {}) {
   return resultadoScript(await callApi('prestacao_pagar', {...deps, params: {dados: JSON.stringify({id, paga, data})}}));
 }
+export async function adendaRegistar(pedido, deps = {}) {
+  return resultadoScript(await callApi('adenda_registar', {...deps, params: {dados: JSON.stringify(pedido)}}));
+}
+export async function adendaAplicar({ids}, deps = {}) {
+  return resultadoScript(await callApi('adenda_aplicar', {...deps, params: {dados: JSON.stringify({ids})}}));
+}
+export async function adendaRevogar({ids, motivo}, deps = {}) {
+  return resultadoScript(await callApi('adenda_revogar', {...deps, params: {dados: JSON.stringify({ids, motivo})}}));
+}
 export async function indemnizacaoAnular({id, observacoes = ''}, deps = {}) {
   return resultadoScript(await callApi('indemnizacao_anular', {...deps, params: {dados: JSON.stringify({id, observacoes})}}));
 }

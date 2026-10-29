@@ -122,7 +122,10 @@ export function adendas(linhas) {
     inicio: data(campo(l, 'Data_Inicio_Vigencia')),
     fim: data(campo(l, 'Data_Fim_Vigencia')),
     estado: texto(campo(l, 'Estado_Adenda')),
-    aplicada: texto(campo(l, 'Aplicada'))
+    aplicada: texto(campo(l, 'Aplicada')),
+    motivo: texto(campo(l, 'Motivo')),
+    documento: texto(campo(l, 'Documento_Referencia')),
+    departamento: texto(campo(l, 'Departamento'))
   })).sort((a, b) => (b.inicio || '').localeCompare(a.inicio || ''));
 }
 

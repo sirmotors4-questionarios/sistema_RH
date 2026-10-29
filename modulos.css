@@ -295,3 +295,15 @@ th.num .th-ordem{flex-direction:row-reverse}
 .ind-saida h3{font-size:14px;margin:0 0 8px}
 .ind-campo select{border:1px solid #dce3eb;border-radius:8px;padding:9px 10px;font:inherit;font-weight:500;background:#fff}
 .ind-form-1{grid-template-columns:minmax(0,1fr)}
+
+/* Adendas */
+.ad-alts h3{font-size:14px;margin:14px 0 8px}
+.ad-alt{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,1fr) minmax(180px,1.4fr) 32px;gap:10px;align-items:center;border:1px solid #eef1f5;border-radius:10px;padding:8px 10px;margin-bottom:8px}
+.ad-alt select,.ad-alt input{border:1px solid #dce3eb;border-radius:8px;padding:8px 10px;font:inherit;width:100%;box-sizing:border-box;background:#fff}
+.ad-ant span{display:block;font-size:11px;color:#738092}.ad-ant b{font-size:13px}
+.ad-novo{display:flex;flex-direction:column;gap:3px}.ad-inp{display:block}
+.ad-dif{font-size:11px;color:#9e1d2c;min-height:13px}
+.ad-nota{display:block;font-size:12px;color:#7a1220;margin:4px 0}
+.ad-resumo .rel-nota{margin-top:0}
+td.ad-pendente{color:#be2537;font-weight:700}
+@media(max-width:720px){.ad-alt{grid-template-columns:1fr 1fr}.ad-alt .ad-novo{grid-column:1/-1}}

@@ -1,9 +1,10 @@
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
 import {iniciarRelatorios} from "./relatorios-ui.js";
 import {iniciarIndemnizacoes} from "./indemnizacoes-ui.js";
+import * as AD from "./adendas-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
-import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar} from "./rh-api.js";
+import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
@@ -22,7 +23,7 @@ const MAX_LINHAS = 300;
 const $ = id => document.getElementById(id);
 const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",indemnizacoes:"Indemnizações",relatorios:"Relatórios",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
-const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos"],salarios:["lancamentos","funcionarios"],ferias:["ferias"],indemnizacoes:["funcionarios"]};
+const precisa={dashboard:["funcionarios","contratos","lancamentos","ferias"],colaboradores:["funcionarios","contratos"],adendas:["contratos","funcionarios"],salarios:["lancamentos","funcionarios"],ferias:["ferias"],indemnizacoes:["funcionarios"]};
 
 const dados={};          // módulo -> {tabelas, carregado}
 const pedidos={};        // módulo -> Promise em curso
@@ -274,10 +275,13 @@ function renderAdendas(){
  const filtro=$("addenda-filter");
  if(!filtro.dataset.real){fillSelect(filtro,M.contagem(lista,a=>a.estado).map(([k])=>k),"Todos os estados");filtro.dataset.real="1"}
  const termo=$("addenda-search").value.trim().toLocaleLowerCase("pt"),estado=filtro.value;
- const result=lista.filter(a=>(!estado||a.estado===estado)&&(!termo||[a.codigo,a.nome,a.campo,a.numero].some(x=>x.toLocaleLowerCase("pt").includes(termo))));
+ const result=lista.filter(a=>(!estado||a.estado===estado)&&(!termo||[a.codigo,a.nome,a.campo,a.numero,a.motivo].some(x=>x.toLocaleLowerCase("pt").includes(termo))));
  const body=$("addenda-body");body.replaceChildren();
- if(!result.length)emptyRow(body,9,"Nenhuma adenda corresponde aos filtros.");
- result.slice(0,MAX_LINHAS).forEach(a=>{const tr=document.createElement("tr");cell(tr,a.numero||a.id);cell(tr,[a.codigo,a.nome].filter(Boolean).join(" · "),{strong:true});cell(tr,a.campo);cell(tr,a.anterior);cell(tr,a.novo);cell(tr,M.formatarData(a.inicio));cell(tr,a.fim?M.formatarData(a.fim):"—");cell(tr,a.estado);cell(tr,a.aplicada);body.append(tr)});
+ if(!result.length)emptyRow(body,10,"Nenhuma adenda corresponde aos filtros.");
+ const grupos=new Map(AD.agrupar(lista).flatMap(g=>g.linhas.map(l=>[l,g])));
+ result.slice(0,MAX_LINHAS).forEach(a=>{const tr=document.createElement("tr");const g=grupos.get(a);cell(tr,a.numero||a.id);cell(tr,[a.codigo,a.nome].filter(Boolean).join(" · "),{strong:true});cell(tr,a.motivo||"—");cell(tr,a.campo);cell(tr,a.anterior);cell(tr,a.novo);cell(tr,M.formatarData(a.inicio));cell(tr,a.fim?M.formatarData(a.fim):"—");cell(tr,a.estado);
+  const pend=!/anulad/i.test(a.estado)&&!/^sim$/i.test(a.aplicada);cell(tr,pend?"Pendente":(a.aplicada||"—"));if(pend)tr.lastChild.classList.add("ad-pendente");
+  tr.tabIndex=0;tr.title="Ver a adenda";const abre=()=>g&&adn.detalhe(g);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
  $("addenda-count").textContent=result.length+" de "+lista.length+" adenda(s)"+(result.length>MAX_LINHAS?" · a mostrar "+MAX_LINHAS:"");
 }
 // ---------- colunas da tabela de lançamentos ----------
@@ -571,6 +575,20 @@ const indemn=iniciarIndemnizacoes({
  },
  aviso:showToast
 });
+// ---------- Adendas (escritas pelo Office Script através do fluxo RH_API_Indemnizacoes) ----------
+const transpAd=()=>({credenciais:sessaoAcesso(),url:urlIndemnizacoes()});
+const adn=AD.iniciarAdendas({
+ ligado:()=>ligado,
+ podeGravar,
+ temUrl:()=>Boolean(sessaoAcesso()&&urlIndemnizacoes()),
+ funcionarios:()=>dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[],
+ registar:p=>adendaRegistar(p,transpAd()),
+ aplicar:p=>adendaAplicar(p,transpAd()),
+ revogar:p=>adendaRevogar(p,transpAd()),
+ recarregar:()=>Promise.all([carregar("contratos",true),carregar("funcionarios",true)]).catch(e=>showToast(e.message)),
+ aviso:showToast
+});
+$("nova-adenda").addEventListener("click",()=>{if(!ligado){abrirAcesso("Entre com o seu código de acesso para registar adendas.");return}carregar("funcionarios");adn.nova()});
 $("btn-preview").addEventListener("click",()=>lanc.preVisualizar());
 $("btn-pdf").addEventListener("click",e=>{const b=e.currentTarget;b.disabled=true;lanc.exportarFolha("pdf").catch(x=>showToast(x.message)).finally(()=>b.disabled=false)});
 $("btn-xlsx").addEventListener("click",e=>{const b=e.currentTarget;b.disabled=true;lanc.exportarFolha("xlsx").catch(x=>showToast(x.message)).finally(()=>b.disabled=false)});
