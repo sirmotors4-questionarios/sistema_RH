@@ -4,7 +4,7 @@ import {iniciarIndemnizacoes} from "./indemnizacoes-ui.js";
 import * as AD from "./adendas-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
-import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar} from "./rh-api.js";
+import {loadModulo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
@@ -495,7 +495,7 @@ const ficha=criarFicha({
  podeGravar,
  utilizador:()=>sessaoAcesso()?.email||"",
  urlGravacao,guardarUrlGravacao,
- gravar:(modo,pedido)=>gravarColaborador(modo,pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
+ gravar:(modo,pedido)=>gravarFicha(modo,pedido),
  recarregar:()=>carregar("funcionarios",true),
  aviso:showToast
 });
@@ -544,6 +544,18 @@ const relatorios=iniciarRelatorios({
  indemnizacoes:()=>lerIndemnizacoes(true),
  aviso:showToast
 });
+// Gravação de uma ficha. Se a edição for recusada porque a linha não tem Chave_RH, preenche as chaves em falta
+// (Office Script, modo "chaves", pelo fluxo RH_API_Indemnizacoes) e tenta outra vez, uma única vez.
+async function gravarFicha(modo,pedido){
+ const t={credenciais:sessaoAcesso(),url:urlGravacao()};
+ try{return await gravarColaborador(modo,pedido,t)}
+ catch(e){
+  if(modo!=="editar"||e?.status!==409||!urlIndemnizacoes())throw e;
+  const r=await colaboradoresChaves({credenciais:sessaoAcesso(),url:urlIndemnizacoes()});
+  if(!r.preenchidas)throw e;
+  return gravarColaborador(modo,pedido,t);
+ }
+}
 // Leitura partilhada das indemnizações (Dashboard e Relatórios). Sem sessão por código ou sem o endereço do fluxo → null.
 let cacheIndemn=null;
 function lerIndemnizacoes(forcar=false){
@@ -570,7 +582,7 @@ const indemn=iniciarIndemnizacoes({
   const pedido=M.prepararGravacao("editar",d,{original,cabecalhos:M.colunas(funcs),utilizador:sessaoAcesso()?.email||""});
   if(pedido.ignorados.length)throw Error("A tbl_funcionarios não tem a coluna de: "+pedido.ignorados.join(", ")+". A saída não foi gravada.");
   if(!pedido.alteracoes)return;
-  await gravarColaborador("editar",pedido,{credenciais:sessaoAcesso(),url:urlGravacao()});
+  await gravarFicha("editar",pedido);
   carregar("funcionarios",true).catch(()=>{});
  },
  aviso:showToast

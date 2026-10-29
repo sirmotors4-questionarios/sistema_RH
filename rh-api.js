@@ -162,6 +162,11 @@ export async function indemnizacaoGravar(pedido, deps = {}) {
 export async function prestacaoPagar({id, paga = true, data = ''}, deps = {}) {
   return resultadoScript(await callApi('prestacao_pagar', {...deps, params: {dados: JSON.stringify({id, paga, data})}}));
 }
+// Preenche a Chave_RH (EMPRESA|CÓDIGO) onde estiver vazia; sem ela o RH_API_Actualizar não encontra a linha a editar.
+export async function colaboradoresChaves(deps = {}) {
+  const r = resultadoScript(await callApi('colaboradores_chaves', {...deps, params: {dados: '{}'}}));
+  return {preenchidas: Number(r.preenchidas) || 0, semCodigo: Number(r.semCodigo) || 0};
+}
 export async function adendaRegistar(pedido, deps = {}) {
   return resultadoScript(await callApi('adenda_registar', {...deps, params: {dados: JSON.stringify(pedido)}}));
 }
