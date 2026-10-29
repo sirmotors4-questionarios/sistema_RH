@@ -125,8 +125,9 @@ export function gerarCodigoTemporario(n = 10, rnd = globalThis.crypto) {
 // nenhum servidor. Ao abrir, a página guarda-os neste navegador e apaga o fragmento da barra de endereço.
 const b64url = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const deB64url = s => decodeURIComponent(escape(atob(String(s).replace(/-/g, '+').replace(/_/g, '/'))));
-export function linkConfiguracao(base, {gravacao = false, email = ''} = {}) {
-  const cfg = {a: urlGuardada(), i: urlIndemnizacoes()};
+export function linkConfiguracao(base, {gravacao = false, gestao = true, email = ''} = {}) {
+  const cfg = {a: urlGuardada()};
+  if (gestao && urlIndemnizacoes()) cfg.i = urlIndemnizacoes();
   if (gravacao && urlGravacao()) cfg.g = urlGravacao();
   if (email) cfg.e = normalizarEmail(email);
   if (!cfg.a) throw Error('Este navegador não tem o endereço do fluxo RH_API_Acesso.');

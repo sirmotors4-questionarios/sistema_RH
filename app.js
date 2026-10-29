@@ -5,7 +5,7 @@ import * as AD from "./adendas-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
 import {iniciarAcessos} from "./acessos-ui.js";
-import {loadModulo, loadConfiguracoes, acessoTrocar, acessosListar, acessosGravar, acessosCodigo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
+import {loadModulo, loadConfiguracoes, acessoTrocar, PODE_TROCAR_CODIGO, acessosListar, acessosGravar, acessosCodigo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO, actualizarChaveSessao, gerarCodigoTemporario, linkConfiguracao, lerConfiguracaoDoLink} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
@@ -434,10 +434,11 @@ function mostrarUtilizador(u){
  $("avatar").title=(u.nome||u.email)+" · "+u.perfil;
  $("source-sub").textContent=u.perfil+(u.propor?"":" · só consulta");
  $("nav-acessos").hidden=!(sessaoAcesso()&&u.perfil==="Superadministrador");
- if(u.trocarCodigo&&sessaoAcesso()&&ecra.hidden)abrirTroca("obrigatoria");
+ $("trocar-codigo").hidden=!(sessaoAcesso()&&PODE_TROCAR_CODIGO(u));
+ if(u.trocarCodigo&&PODE_TROCAR_CODIGO(u)&&sessaoAcesso()&&ecra.hidden)abrirTroca("obrigatoria");
 }
 function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAcesso());
- $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);$("trocar-codigo").hidden=!codigo;
+ $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);$("trocar-codigo").hidden=!(codigo&&PODE_TROCAR_CODIGO(utilizadorActual));
  document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
 function ligar(quem,via){
  ligado=true;botoes();
@@ -486,7 +487,9 @@ async function entrar(){
  try{r=await loadConfiguracoes({credenciais:s,url:urlGuardada()})}
  catch(e){sairAcesso();throw e.code==="RH_FORBIDDEN"?Error("E-mail ou código de acesso errados, ou conta inactiva."):e}
  $("access-code").value="";$("access-url").value="";$("login-config").hidden=true;
- if(r.utilizador.trocarCodigo){entradaPendente={email:s.email};abrirTroca("obrigatoria");return}
+ // Só os perfis que o fluxo de gestão aceita (Superadministrador, Administrador RH) podem trocar o código no site.
+ if(r.utilizador.trocarCodigo&&PODE_TROCAR_CODIGO(r.utilizador)){entradaPendente={email:s.email};abrirTroca("obrigatoria");return}
+ if(r.utilizador.trocarCodigo)setTimeout(()=>showToast("Está a usar um código temporário. Peça ao Superadministrador para o substituir."),800);
  concluirEntrada(s.email);
 }
 function concluirEntrada(email){fecharAcesso();entradaPendente=null;ligar(email,"código de acesso")}
@@ -657,8 +660,8 @@ const acessosPag=iniciarAcessos({
  minimo:CODIGO_MINIMO,
  eu:()=>sessaoAcesso()?.email||"",
  empresas:()=>dados.funcionarios?[...new Set(linhas("funcionarios","tbl_funcionarios").map(f=>String(f.Empresa??"").trim()).filter(Boolean))].sort():[],
- // Administradores recebem também o endereço de gravação (RH_API_Actualizar), se este navegador o tiver.
- link:u=>linkConfiguracao(location.origin+location.pathname,{gravacao:/administrador/i.test(u.perfil),email:u.email}),
+ // Só os perfis que gravam recebem os endereços de gestão e de gravação; os restantes só o de consulta.
+ link:u=>{const adm=/administrador/i.test(u.perfil);return linkConfiguracao(location.origin+location.pathname,{gravacao:adm,gestao:adm,email:u.email})},
  aviso:showToast
 });
 render();
