@@ -7,7 +7,13 @@
  * accao "gravar"   — acrescenta uma indemnização e o seu plano de prestações (tudo validado antes de escrever).
  * accao "pagar"    — marca/desmarca uma prestação como paga (dados: {id, paga, data}).
  * accao "anular"   — marca uma indemnização como Anulada (não apaga linhas).
- * Nunca apaga linhas nem toca noutras tabelas. Devolve um objecto simples (sem índices genéricos).
+ * Cadastro e adendas (mesmo fluxo):
+ * accao "chaves"   — preenche Chave_RH (EMPRESA|CÓDIGO) na tbl_funcionarios onde estiver vazia (necessária para editar fichas).
+ * accao "registar" — regista uma adenda (uma linha por campo em tbl_adendas) e, se a vigência já começou e «aplicar»
+ *                    for verdadeiro, aplica os novos valores à tbl_funcionarios (nunca a células com fórmula).
+ * accao "aplicar"  — aplica ao cadastro adendas pendentes (dados: {ids}).
+ * accao "revogar"  — marca adendas como Anuladas (dados: {ids, motivo}); o cadastro não é revertido.
+ * Nunca apaga linhas. Devolve um objecto simples (sem índices genéricos).
  */
 const FOLHA = "Indemnizacoes";
 const T_IND = "tbl_indemnizacoes";
@@ -29,13 +35,18 @@ interface Resultado {
   ok: boolean; accao: string; erro?: string; erros?: string[]; criadas?: string[];
   id?: string; anos?: number; total?: number; prestacoes?: number; paga?: boolean;
   listaIndemnizacoes?: string; listaPrestacoes?: string; // JSON das tabelas (accao "listar")
+  ids?: string[]; numero?: number; aplicada?: boolean; preenchidas?: number; semCodigo?: number;
 }
+interface Alteracao { campo: string; novo: string; }
 interface Pedido {
   empresa?: string; codigo?: string; nome?: string; departamento?: string;
   dataAdmissao?: string; dataReferencia?: string; vencimentoBase?: number;
   diaLimite?: number; primeiroMes?: string; observacoes?: string;
   prestacoes?: Prestacao[];
   id?: string; paga?: boolean; data?: string;
+  // adendas
+  motivo?: string; dataAdenda?: string; inicio?: string; fim?: string; documento?: string;
+  alteracoes?: Alteracao[]; aplicar?: boolean; ids?: string[];
 }
 
 function main(workbook: ExcelScript.Workbook, accao: string, dados: string, utilizador: string): Resultado {
@@ -44,6 +55,10 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
     let p: Pedido = {};
     if (dados && String(dados).trim()) p = JSON.parse(dados) as Pedido;
     if (a === "preparar") return preparar(workbook);
+    if (a === "chaves") return preencherChaves(workbook);
+    if (a === "registar") return registarAdenda(workbook, p, utilizador);
+    if (a === "aplicar") return aplicarAdendas(workbook, p, utilizador);
+    if (a === "revogar") return revogarAdendas(workbook, p, utilizador);
     const ind = workbook.getTable(T_IND), pre = workbook.getTable(T_PRE);
     if (!ind || !pre) return erro("As tabelas das indemnizações ainda não existem. Corra a acção «preparar».");
     if (a === "listar") return {ok: true, accao: a, listaIndemnizacoes: ler(ind), listaPrestacoes: ler(pre)};
@@ -246,4 +261,196 @@ function anular(ind: ExcelScript.Table, p: Pedido, utilizador: string): Resultad
   set("Data Ultima Alteracao", hojeSerie());
   if (p.observacoes) set("Observacoes", String(p.observacoes));
   return {ok: true, accao: "anular", id};
+}
+
+
+// ======================================================================== cadastro e adendas
+const T_FUNC = "tbl_funcionarios";
+const T_AD = "tbl_adendas";
+// Campos que uma adenda pode alterar (nomes iguais aos cabeçalhos da tbl_funcionarios). Empresa e Código não:
+// mudar de empresa muda a chave do colaborador.
+const CAMPOS_ADENDA = ["Vencimento Base", "RegimePagamento", "TipoContrato", "Departamento", "Profissao", "Categoria", "SituacaoProfissional"];
+const REGIMES = ["Mensal", "Diário", "Hora"];
+
+function agoraSerie(): number {
+  const d = new Date();
+  return (d.getTime() - d.getTimezoneOffset() * 60000) / 86400000 + 25569;
+}
+function textoCelula(v: Celula): string { return String(v ?? "").trim(); }
+function cabecalho(t: ExcelScript.Table): string[] { return t.getHeaderRowRange().getValues()[0].map(h => String(h)); }
+
+// Linha (índice no corpo) de um colaborador pela Empresa + Código.
+function linhaColaborador(func: ExcelScript.Table, empresa: string, codigo: string): number {
+  const cab = cabecalho(func), iE = cab.indexOf("Empresa"), iC = cab.indexOf("Codigo");
+  const vals = dadosTabela(func);
+  return vals.findIndex(v => textoCelula(v[iE]).toUpperCase() === empresa.toUpperCase() && normCodigo(v[iC]) === codigo);
+}
+
+function preencherChaves(workbook: ExcelScript.Workbook): Resultado {
+  const func = workbook.getTable(T_FUNC);
+  if (!func) return erro("Tabela tbl_funcionarios não encontrada.");
+  const cab = cabecalho(func), iK = cab.indexOf("Chave_RH"), iE = cab.indexOf("Empresa"), iC = cab.indexOf("Codigo");
+  if (iK < 0) return erro("A tbl_funcionarios não tem a coluna Chave_RH.");
+  const col = func.getColumnByName("Chave_RH").getRangeBetweenHeaderAndTotal();
+  const formulas = col.getFormulas();
+  if (formulas.some(f => String(f[0]).startsWith("="))) return erro("A coluna Chave_RH tem fórmulas; não foi alterada.");
+  const vals = dadosTabela(func), novos: Celula[][] = [];
+  let preenchidas = 0, semCodigo = 0;
+  vals.forEach(v => {
+    const actual = textoCelula(v[iK]), emp = textoCelula(v[iE]), cod = textoCelula(v[iC]);
+    if (actual) { novos.push([v[iK]]); return; }
+    if (!emp || !cod) { if (emp || cod || textoCelula(v[cab.indexOf("Nome")])) semCodigo++; novos.push([""]); return; }
+    novos.push([emp.toUpperCase() + "|" + normCodigo(cod)]); preenchidas++;
+  });
+  // chaves repetidas impediriam a edição: verifica antes de escrever
+  const vistas = new Map<string, number>();
+  novos.forEach(n => { const k = textoCelula(n[0]).toUpperCase(); if (k) vistas.set(k, (vistas.get(k) || 0) + 1); });
+  const repetidas = Array.from(vistas.entries()).filter(e => e[1] > 1).map(e => e[0]);
+  if (repetidas.length) return {ok: false, accao: "chaves", erro: "Há colaboradores repetidos (mesma Empresa + Código): " + repetidas.slice(0, 10).join(", ") + ". Nada foi alterado.", erros: repetidas};
+  if (preenchidas) col.setValues(novos);
+  return {ok: true, accao: "chaves", preenchidas, semCodigo};
+}
+
+function validarValor(campo: string, novo: string): string {
+  if (!novo) return "Indique o novo valor de " + campo + ".";
+  if (campo === "Vencimento Base") { const n = Number(novo); if (!isFinite(n) || n <= 0) return "Vencimento base inválido."; }
+  if (campo === "RegimePagamento" && REGIMES.indexOf(novo) < 0) return "Regime de pagamento inválido (Mensal, Diário ou Hora).";
+  if (novo.length > 120) return campo + ": máximo 120 caracteres.";
+  return "";
+}
+
+// Escreve no cadastro os valores de uma adenda. Devolve erro (texto) ou "".
+function aplicarNoCadastro(func: ExcelScript.Table, iLinha: number, alteracoes: Alteracao[], utilizador: string): string {
+  const cab = cabecalho(func), linha = func.getRangeBetweenHeaderAndTotal().getRow(iLinha);
+  const formulas = linha.getFormulas()[0];
+  for (const a of alteracoes) {
+    const j = cab.indexOf(a.campo);
+    if (j < 0) return "A tbl_funcionarios não tem a coluna " + a.campo + ".";
+    if (String(formulas[j]).startsWith("=")) return "A coluna " + a.campo + " tem fórmula no cadastro; não foi alterada.";
+  }
+  for (const a of alteracoes) {
+    const j = cab.indexOf(a.campo);
+    linha.getCell(0, j).setValue(a.campo === "Vencimento Base" ? Number(a.novo) : a.novo);
+  }
+  const jD = cab.indexOf("Data Ultima Alteracao"), jU = cab.indexOf("Utilizador Alteracao"), jK = cab.indexOf("Chave_RH");
+  if (jD >= 0 && !String(formulas[jD]).startsWith("=")) linha.getCell(0, jD).setValue(agoraSerie());
+  if (jU >= 0 && !String(formulas[jU]).startsWith("=")) linha.getCell(0, jU).setValue(utilizador);
+  if (jK >= 0 && !textoCelula(linha.getValues()[0][jK] as Celula)) {
+    const v = linha.getValues()[0] as Celula[];
+    linha.getCell(0, jK).setValue(textoCelula(v[cab.indexOf("Empresa")]).toUpperCase() + "|" + normCodigo(v[cab.indexOf("Codigo")]));
+  }
+  return "";
+}
+
+function registarAdenda(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const func = workbook.getTable(T_FUNC), ad = workbook.getTable(T_AD);
+  if (!func || !ad) return erro("Faltam as tabelas tbl_funcionarios ou tbl_adendas.");
+  const erros: string[] = [];
+  const empresa = String(p.empresa || "").trim(), codigo = normCodigo(p.codigo);
+  const iLinha = linhaColaborador(func, empresa, codigo);
+  if (iLinha < 0) return erro("Colaborador não encontrado: " + empresa + " / " + codigo + ".");
+  const motivo = String(p.motivo || "").trim();
+  if (!motivo) erros.push("Indique o motivo da adenda.");
+  const sAd = serie(String(p.dataAdenda || "")), sIni = serie(String(p.inicio || "")), sFim = p.fim ? serie(String(p.fim)) : NaN;
+  if (!isFinite(sAd)) erros.push("Data da adenda inválida.");
+  if (!isFinite(sIni)) erros.push("Data de início de vigência inválida.");
+  if (p.fim && (!isFinite(sFim) || sFim < sIni)) erros.push("A data de fim de vigência é inválida ou anterior ao início.");
+  const alts = Array.isArray(p.alteracoes) ? p.alteracoes.map(a => ({campo: String(a.campo || "").trim(), novo: String(a.novo ?? "").trim()})) : [];
+  if (!alts.length) erros.push("Indique pelo menos uma alteração.");
+  const vistos: string[] = [];
+  const cabF = cabecalho(func), linhaF = func.getRangeBetweenHeaderAndTotal().getRow(iLinha).getValues()[0] as Celula[];
+  alts.forEach(a => {
+    if (CAMPOS_ADENDA.indexOf(a.campo) < 0) erros.push("Campo não permitido numa adenda: " + a.campo + ".");
+    if (vistos.indexOf(a.campo) >= 0) erros.push("Campo repetido: " + a.campo + ".");
+    vistos.push(a.campo);
+    const e = validarValor(a.campo, a.novo); if (e) erros.push(e);
+    const j = cabF.indexOf(a.campo);
+    if (j >= 0 && textoCelula(linhaF[j]) === a.novo) erros.push(a.campo + ": o novo valor é igual ao actual.");
+  });
+  if (erros.length) return {ok: false, accao: "registar", erro: erros.join(" "), erros};
+
+  const cabA = cabecalho(ad), existentes = dadosTabela(ad).filter(v => !vazia(v));
+  const iId = cabA.indexOf("ID_Adenda"), iNum = cabA.indexOf("Numero_Adenda"), iCod = cabA.indexOf("Codigo"), iEmp = cabA.indexOf("Empresa");
+  const ano = new Date().getFullYear();
+  let maiorId = 0, maiorNum = 0;
+  existentes.forEach(v => {
+    const m = new RegExp("^AD-" + ano + "-(\\d+)$").exec(textoCelula(v[iId])); if (m) maiorId = Math.max(maiorId, Number(m[1]));
+    if (normCodigo(v[iCod]) === codigo && textoCelula(v[iEmp]).toUpperCase() === empresa.toUpperCase()) maiorNum = Math.max(maiorNum, Number(v[iNum]) || 0);
+  });
+  const numero = maiorNum + 1, hoje = hojeSerie(), agora = agoraSerie();
+  const aplicarJa = p.aplicar !== false && sIni <= hoje;
+  const ids: string[] = [];
+  const nome = textoCelula(linhaF[cabF.indexOf("Nome")]), dep = textoCelula(linhaF[cabF.indexOf("Departamento")]);
+  const linhas = alts.map((a, k) => {
+    const id = "AD-" + ano + "-" + String(maiorId + 1 + k).padStart(4, "0"); ids.push(id);
+    const j = cabF.indexOf(a.campo), anterior = j >= 0 ? linhaF[j] : "";
+    const dif = a.campo === "Vencimento Base" && isFinite(Number(anterior)) ? cent(Number(a.novo) - Number(anterior)) : "";
+    const o: { [k: string]: Celula } = {
+      "ID_Adenda": id, "Codigo": codigo, "Nome": nome, "Empresa": empresa, "Departamento": dep, "Numero_Adenda": numero,
+      "Data_Adenda": sAd, "Data_Inicio_Vigencia": sIni, "Data_Fim_Vigencia": isFinite(sFim) ? sFim : "", "Motivo": motivo,
+      "Campo_Alterado": a.campo, "Valor_Anterior": anterior, "Valor_Novo": a.campo === "Vencimento Base" ? Number(a.novo) : a.novo, "Diferenca": dif,
+      "Observacoes": String(p.observacoes || ""), "Observacoes_Adicionais": "", "Documento_Referencia": String(p.documento || ""),
+      "Estado_Adenda": "Activa", "Data_Aplicacao": aplicarJa ? hoje : "", "Aplicada": aplicarJa ? "Sim" : "Não",
+      "Origem_Alteracao": "Sistema RH (web)", "Data_Criacao": agora, "Utilizador_Criacao": utilizador,
+      "Data_Ultima_Alteracao": agora, "Utilizador_Alteracao": utilizador
+    };
+    return linhaPorCabecalho(ad, o);
+  });
+  if (aplicarJa) { const e = aplicarNoCadastro(func, iLinha, alts, utilizador); if (e) return erro(e + " A adenda não foi registada."); }
+  limparFiltro(ad);
+  inserir(ad, linhas);
+  return {ok: true, accao: "registar", ids, numero, aplicada: aplicarJa};
+}
+
+// Adendas seleccionadas por ID (vários campos da mesma adenda têm IDs diferentes).
+function adendasPorId(ad: ExcelScript.Table, ids: string[]): number[] {
+  const cab = cabecalho(ad), iId = cab.indexOf("ID_Adenda"), alvo = ids.map(x => String(x).trim().toUpperCase());
+  const out: number[] = [];
+  dadosTabela(ad).forEach((v, i) => { if (alvo.indexOf(textoCelula(v[iId]).toUpperCase()) >= 0) out.push(i); });
+  return out;
+}
+
+function aplicarAdendas(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const func = workbook.getTable(T_FUNC), ad = workbook.getTable(T_AD);
+  if (!func || !ad) return erro("Faltam as tabelas tbl_funcionarios ou tbl_adendas.");
+  const ids = Array.isArray(p.ids) ? p.ids : [];
+  const linhas = adendasPorId(ad, ids);
+  if (!linhas.length) return erro("Adenda não encontrada.");
+  const cab = cabecalho(ad), corpo = ad.getRangeBetweenHeaderAndTotal(), vals = dadosTabela(ad), hoje = hojeSerie();
+  const c = (k: string) => cab.indexOf(k);
+  for (const i of linhas) {
+    const v = vals[i];
+    if (textoCelula(v[c("Estado_Adenda")]).toLowerCase().startsWith("anulad")) return erro("A adenda " + textoCelula(v[c("ID_Adenda")]) + " está anulada.");
+    if (textoCelula(v[c("Aplicada")]).toLowerCase() === "sim") continue;
+    const iLinha = linhaColaborador(func, textoCelula(v[c("Empresa")]), normCodigo(v[c("Codigo")]));
+    if (iLinha < 0) return erro("Colaborador da adenda " + textoCelula(v[c("ID_Adenda")]) + " não encontrado.");
+    const e = aplicarNoCadastro(func, iLinha, [{campo: textoCelula(v[c("Campo_Alterado")]), novo: textoCelula(v[c("Valor_Novo")])}], utilizador);
+    if (e) return erro(e);
+    const r = corpo.getRow(i);
+    r.getCell(0, c("Aplicada")).setValue("Sim");
+    r.getCell(0, c("Data_Aplicacao")).setValue(hoje);
+    if (c("Data_Ultima_Alteracao") >= 0) r.getCell(0, c("Data_Ultima_Alteracao")).setValue(agoraSerie());
+    if (c("Utilizador_Alteracao") >= 0) r.getCell(0, c("Utilizador_Alteracao")).setValue(utilizador);
+  }
+  return {ok: true, accao: "aplicar", ids, aplicada: true};
+}
+
+function revogarAdendas(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const ad = workbook.getTable(T_AD);
+  if (!ad) return erro("Tabela tbl_adendas não encontrada.");
+  const ids = Array.isArray(p.ids) ? p.ids : [];
+  const linhas = adendasPorId(ad, ids);
+  if (!linhas.length) return erro("Adenda não encontrada.");
+  const motivo = String(p.motivo || "").trim();
+  if (!motivo) return erro("Indique o motivo da anulação.");
+  const cab = cabecalho(ad), corpo = ad.getRangeBetweenHeaderAndTotal(), vals = dadosTabela(ad);
+  const c = (k: string) => cab.indexOf(k);
+  for (const i of linhas) {
+    const r = corpo.getRow(i), obs = textoCelula(vals[i][c("Observacoes_Adicionais")]);
+    r.getCell(0, c("Estado_Adenda")).setValue("Anulada");
+    r.getCell(0, c("Observacoes_Adicionais")).setValue((obs ? obs + " | " : "") + "Anulada por " + utilizador + ": " + motivo);
+    if (c("Data_Ultima_Alteracao") >= 0) r.getCell(0, c("Data_Ultima_Alteracao")).setValue(agoraSerie());
+    if (c("Utilizador_Alteracao") >= 0) r.getCell(0, c("Utilizador_Alteracao")).setValue(utilizador);
+  }
+  return {ok: true, accao: "revogar", ids};
 }
