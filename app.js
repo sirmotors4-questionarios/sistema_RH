@@ -10,7 +10,7 @@ import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizaco
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
-import {unirAdendas} from "./rh-folha.js";
+import {unirAdendas, escaloesPresentes, escalaoIgual, SEM_ESCALAO} from "./rh-folha.js";
 "use strict";
 
 // Sem sessão Microsoft: dados fictícios. Com sessão: dados do Excel via RH_API_Consultar (só leitura).
@@ -32,7 +32,7 @@ let ligado=false, paginaActual="dashboard", utilizadorActual=null;
 
 function go(page,foco){
  if(page==="contratos"){page="colaboradores";foco=foco||"colab-contratos"} // a antiga página Contratos faz agora parte de Colaboradores
- if(page==="configuracoes"){window.location.href="configuracoes.html";return;}
+ if(page==="configuracoes"){if(utilizadorActual?.perfil!=="Superadministrador"){showToast("As Configurações são só para o Superadministrador.");return}window.location.href="configuracoes.html";return;}
  if(!Object.hasOwn(labels,page))return;
  paginaActual=page;
  document.querySelectorAll(".page").forEach(el=>el.classList.toggle("active",el.id===page));
@@ -349,7 +349,13 @@ function renderSalarios(){
  const emp=$("pay-company"),dep=$("pay-department"),col=$("pay-employee");cascata(lista,emp,dep);
  {const atual=col.value;const op=lista.filter(l=>(!emp.value||l.empresa===emp.value)&&(!dep.value||l.departamento===dep.value)).sort((a,b)=>a.codigo.localeCompare(b.codigo));
   col.replaceChildren(new Option("Todos",""),...op.map(l=>new Option(l.codigo+" · "+l.nome,l.codigo)));if(op.some(l=>l.codigo===atual))col.value=atual}
- const result=M.filtrarColaboradores(lista,$("pay-search").value,"",{empresa:emp.value,departamento:dep.value}).filter(l=>!col.value||l.codigo===col.value);
+ // Escalão: opções do mês (filtradas pela empresa/departamento), mais «Sem escalão» quando há linhas sem ele.
+ {const esc=$("pay-escalao"),atual=esc.value,base=lista.filter(l=>(!emp.value||l.empresa===emp.value)&&(!dep.value||l.departamento===dep.value)).map(l=>l.linha);
+  const nomes=escaloesPresentes(base),sem=base.some(l=>!String(M.campo(l,"Escalão")??"").trim());
+  esc.replaceChildren(new Option("Todos",""),...nomes.map(n=>new Option(n,n)),...(sem&&nomes.length?[new Option("Sem escalão",SEM_ESCALAO)]:[]));
+  esc.disabled=!nomes.length;esc.title=nomes.length?"":"Este mês ainda não tem escalões (Configurações → Escalões salariais).";
+  if([...esc.options].some(o=>o.value===atual))esc.value=atual}
+ const result=M.filtrarColaboradores(lista,$("pay-search").value,"",{empresa:emp.value,departamento:dep.value}).filter(l=>(!col.value||l.codigo===col.value)&&escalaoIgual(l.linha,$("pay-escalao").value));
  $("pay-badge").textContent=M.NOME_MES[per.mes-1]+" "+per.ano+" · "+lista.length+" lançamento(s)";
  $("p-count").textContent=String(result.length);
  $("p-states").textContent=M.contagem(result,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos";
@@ -409,6 +415,7 @@ $("employee-clear").addEventListener("click",()=>{["employee-search","employee-c
 $("pay-company").addEventListener("change",()=>{$("pay-department").value="";$("pay-employee").value="";renderSalarios()});
 $("pay-department").addEventListener("change",()=>{$("pay-employee").value="";renderSalarios()});
 $("pay-employee").addEventListener("change",renderSalarios);
+$("pay-escalao").addEventListener("change",renderSalarios);
 $("addenda-search").addEventListener("input",renderAdendas);
 $("addenda-filter").addEventListener("change",renderAdendas);
 $("pay-search").addEventListener("input",renderSalarios);
@@ -434,6 +441,7 @@ function mostrarUtilizador(u){
  $("avatar").title=(u.nome||u.email)+" · "+u.perfil;
  $("source-sub").textContent=u.perfil+(u.propor?"":" · só consulta");
  $("nav-acessos").hidden=!(sessaoAcesso()&&u.perfil==="Superadministrador");
+ $("nav-config").hidden=u.perfil!=="Superadministrador";
  $("trocar-codigo").hidden=!(sessaoAcesso()&&PODE_TROCAR_CODIGO(u));
  if(u.trocarCodigo&&PODE_TROCAR_CODIGO(u)&&sessaoAcesso()&&ecra.hidden)abrirTroca("obrigatoria");
 }
@@ -451,10 +459,10 @@ function ligar(quem,via){
 }
 function desligar(){
  painel.limpar();relatorios.limpar();indemn.limpar();cacheIndemn=null;
- ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();$("nav-acessos").hidden=true;if(paginaActual==="acessos")go("dashboard");
+ ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();$("nav-acessos").hidden=true;$("nav-config").hidden=true;if(paginaActual==="acessos")go("dashboard");
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação ao SharePoint";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
- ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
+ ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee","pay-escalao"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
  if(ficha.aberta())document.getElementById("ficha").close();
  render();
 }
@@ -550,7 +558,7 @@ const lanc=iniciarLancamentos({
  periodo:()=>dados.lancamentos?.periodo||{ano:Number(year.value),mes:Number(month.value)},
  periodoMaisRecente:()=>dados.lancamentos?.periodo||null,
  lancamentosMes:()=>{const p=dados.lancamentos?.periodo;return p?doPeriodo(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes):[]},
- filtros:()=>({empresa:$("pay-company").value,departamento:$("pay-department").value,codigo:$("pay-employee").value}),
+ filtros:()=>({empresa:$("pay-company").value,departamento:$("pay-department").value,codigo:$("pay-employee").value,escalao:$("pay-escalao").value}),
  // A folha segue a tabela: mesma ordenação e, se a estrutura foi alterada, as mesmas colunas pela mesma ordem.
  vistaTabela:()=>{const cat=LC.catalogo(linhas("lancamentos","tbl_lançamento"),dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[]),porId=new Map(cat.map(c=>[c.id,c]));const p=LC.normalizar(colunasLanc,cat);
   return {colunas:p.colunas.map(id=>porId.get(id)).filter(Boolean),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null})}},

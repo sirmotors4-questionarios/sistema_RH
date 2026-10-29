@@ -278,12 +278,26 @@ export function totaisEfectivos(l) {
 
 // ---------- folha (pré-visualização e exportação) ----------
 // Filtros como no VBA: Empresa, Departamento e Colaborador (vazio ou "TODOS" = todos).
-export function filtrarFolha(lancamentos, ano, mes, {empresa = "", departamento = "", codigo = ""} = {}) {
+// Filtro de escalão: "" = todos; SEM_ESCALAO = linhas sem escalão; outro valor = esse escalão.
+export const SEM_ESCALAO = "__sem__";
+export function escalaoIgual(l, escalao) {
+  if (!texto(escalao)) return true;
+  const e = texto(campo(l, "Escalão"));
+  return escalao === SEM_ESCALAO ? !e : igual(e, escalao);
+}
+// Escalões presentes num conjunto de lançamentos, por ordem natural (1.º, 2.º, …, 10.º).
+export function escaloesPresentes(lancamentos) {
+  const vistos = new Map();
+  for (const l of lancamentos) { const e = texto(campo(l, "Escalão")); if (e && !vistos.has(e.toUpperCase())) vistos.set(e.toUpperCase(), e); }
+  return [...vistos.values()].sort((a, b) => a.localeCompare(b, "pt", {numeric: true, sensitivity: "base"}));
+}
+export function filtrarFolha(lancamentos, ano, mes, {empresa = "", departamento = "", codigo = "", escalao = ""} = {}) {
   const todos = v => !texto(v) || igual(v, "TODOS");
   return lancamentos.filter(l => periodoIgual(l, ano, mes) &&
     (todos(empresa) || igual(campo(l, "Empresa"), empresa)) &&
     (todos(departamento) || igual(campo(l, "Departamento"), departamento)) &&
-    (!texto(codigo) || normalizarCodigo(campo(l, "Codigo")) === normalizarCodigo(codigo)));
+    (!texto(codigo) || normalizarCodigo(campo(l, "Codigo")) === normalizarCodigo(codigo)) &&
+    escalaoIgual(l, escalao));
 }
 export function linhasFolha(lancamentos, ano, mes, filtros = {}) {
   return filtrarFolha(lancamentos, ano, mes, filtros)
