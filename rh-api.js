@@ -183,13 +183,15 @@ export async function escaloesAplicarMes({ano, mesNome}, deps = {}) {
   return {alteradas: Number(r.alteradas) || 0, semEscalao: Number(r.semEscalao) || 0};
 }
 // ---------- Acessos (tbl_utilizadores_RH) ----------
-// acesso_trocar: o próprio utilizador (qualquer perfil activo) vê se tem de trocar o código ou troca-o.
+// Troca do próprio código (dados.modulo = "trocar"). O fluxo RH_API_Indemnizacoes só aceita os perfis com
+// permissão de gravação (Superadministrador e Administrador RH); o script confirma que é o próprio e a chave actual.
+export const PODE_TROCAR_CODIGO = u => Boolean(u?.propor);
 export async function acessoEstado(deps = {}) {
-  const r = resultadoScript(await callApi('acesso_trocar', {...deps, params: {dados: JSON.stringify({op: 'estado'})}}));
+  const r = resultadoScript(await callApi('indemnizacoes_listar', {...deps, params: {dados: JSON.stringify({modulo: 'trocar', op: 'estado'})}}));
   return {trocar: r.trocar === true};
 }
 export async function acessoTrocar({chaveActual, chaveNova}, deps = {}) {
-  resultadoScript(await callApi('acesso_trocar', {...deps, params: {dados: JSON.stringify({chaveActual, chaveNova})}}));
+  resultadoScript(await callApi('indemnizacoes_listar', {...deps, params: {dados: JSON.stringify({modulo: 'trocar', chaveActual, chaveNova})}}));
   return {ok: true};
 }
 // Gestão (só Superadministrador; o script confirma o perfil de quem pede).

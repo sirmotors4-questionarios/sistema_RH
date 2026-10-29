@@ -18,7 +18,8 @@
  *                    (cria a tabela se não existir); "aplicar": preenche a coluna Escalão da tbl_lançamento
  *                    num mês (dados: {ano, mesNome}), só nas linhas não finalizadas.
  * Acessos (tbl_utilizadores_RH):
- * accao "trocar"   — (acção acesso_trocar, qualquer perfil activo) troca o código do próprio utilizador:
+ * accao "trocar" ou dados.modulo "trocar" — troca o código do próprio utilizador (o fluxo só deixa passar
+ *                    os perfis com permissão de gravação):
  *                    dados {chaveActual, chaveNova} ou {op:"estado"} para saber se tem de trocar.
  * dados.modulo "acessos" — só Superadministrador: op "listar" (sem as chaves), "gravar" (criar/alterar
  *                    utilizador) e "codigo" (definir código temporário: Trocar_Codigo = Sim).
@@ -72,7 +73,7 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
     if (dados && String(dados).trim()) p = JSON.parse(dados) as Pedido;
     // "trocar" (acção acesso_trocar) é a única aceite pelo fluxo para qualquer perfil: só troca o código do próprio
     // utilizador e ignora tudo o resto do pedido (nunca chega aos outros módulos).
-    if (a === "trocar") return trocarCodigo(workbook, p, utilizador);
+    if (a === "trocar" || p.modulo === "trocar") return trocarCodigo(workbook, p, utilizador);
     if (a === "preparar") return preparar(workbook);
     if (a === "chaves") return preencherChaves(workbook);
     if (a === "registar") return registarAdenda(workbook, p, utilizador);
