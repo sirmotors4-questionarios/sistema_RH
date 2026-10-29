@@ -13,7 +13,11 @@
  *                    for verdadeiro, aplica os novos valores à tbl_funcionarios (nunca a células com fórmula).
  * accao "aplicar"  — aplica ao cadastro adendas pendentes (dados: {ids}).
  * accao "revogar"  — marca adendas como Anuladas (dados: {ids, motivo}); o cadastro não é revertido.
- * Nunca apaga linhas. Devolve um objecto simples (sem índices genéricos).
+ * Escalões salariais (tbl_escaloes_lancamento, folha "Escaloes"):
+ * accao "escaloes" — dados.op "ler": devolve as definições; "gravar": substitui os escalões de UMA empresa
+ *                    (cria a tabela se não existir); "aplicar": preenche a coluna Escalão da tbl_lançamento
+ *                    num mês (dados: {ano, mesNome}), só nas linhas não finalizadas.
+ * Só apaga linhas da tbl_escaloes_lancamento (ao substituir os escalões da empresa gravada). Devolve um objecto simples (sem índices genéricos).
  */
 const FOLHA = "Indemnizacoes";
 const T_IND = "tbl_indemnizacoes";
@@ -36,6 +40,7 @@ interface Resultado {
   id?: string; anos?: number; total?: number; prestacoes?: number; paga?: boolean;
   listaIndemnizacoes?: string; listaPrestacoes?: string; // JSON das tabelas (accao "listar")
   ids?: string[]; numero?: number; aplicada?: boolean; preenchidas?: number; semCodigo?: number;
+  listaEscaloes?: string; alteradas?: number; semEscalao?: number;
 }
 interface Alteracao { campo: string; novo: string; }
 interface Pedido {
@@ -47,7 +52,10 @@ interface Pedido {
   // adendas
   motivo?: string; dataAdenda?: string; inicio?: string; fim?: string; documento?: string;
   alteracoes?: Alteracao[]; aplicar?: boolean; ids?: string[];
+  // escalões
+  op?: string; criterio?: string; faixas?: Faixa[]; ano?: number; mesNome?: string;
 }
+interface Faixa { escalao: string; inicio: number; }
 
 function main(workbook: ExcelScript.Workbook, accao: string, dados: string, utilizador: string): Resultado {
   try {
@@ -59,6 +67,7 @@ function main(workbook: ExcelScript.Workbook, accao: string, dados: string, util
     if (a === "registar") return registarAdenda(workbook, p, utilizador);
     if (a === "aplicar") return aplicarAdendas(workbook, p, utilizador);
     if (a === "revogar") return revogarAdendas(workbook, p, utilizador);
+    if (a === "escaloes") return escaloes(workbook, p, utilizador);
     const ind = workbook.getTable(T_IND), pre = workbook.getTable(T_PRE);
     if (!ind || !pre) return erro("As tabelas das indemnizações ainda não existem. Corra a acção «preparar».");
     if (a === "listar") return {ok: true, accao: a, listaIndemnizacoes: ler(ind), listaPrestacoes: ler(pre)};
@@ -453,4 +462,130 @@ function revogarAdendas(workbook: ExcelScript.Workbook, p: Pedido, utilizador: s
     if (c("Utilizador_Alteracao") >= 0) r.getCell(0, c("Utilizador_Alteracao")).setValue(utilizador);
   }
   return {ok: true, accao: "revogar", ids};
+}
+
+// ---------- Escalões salariais ----------
+const FOLHA_ESC = "Escaloes";
+const T_ESC = "tbl_escaloes_lancamento";
+const T_LANC = "tbl_lançamento";
+const COL_ESC = ["Empresa", "Criterio", "Escalao", "Valor_Inicial", "Ordem", "Data Ultima Alteracao", "Utilizador Alteracao"];
+const CRITERIOS = ["Salario Liquido", "Vencimento Base", "Vencimento"];
+const COL_ESCALAO = "Escalão";
+
+function escaloes(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const op = String(p.op || "ler").trim().toLowerCase();
+  if (op === "ler") {
+    const t = workbook.getTable(T_ESC);
+    return {ok: true, accao: "escaloes", listaEscaloes: t ? ler(t) : "[]"};
+  }
+  if (op === "gravar") return gravarEscaloes(workbook, p, utilizador);
+  if (op === "aplicar") return aplicarEscaloesMes(workbook, p);
+  return erro("Operação de escalões desconhecida: " + op);
+}
+
+function tabelaEscaloes(workbook: ExcelScript.Workbook): ExcelScript.Table {
+  let t = workbook.getTable(T_ESC);
+  if (t) return t;
+  let folha = workbook.getWorksheet(FOLHA_ESC);
+  if (!folha) folha = workbook.addWorksheet(FOLHA_ESC);
+  const r = folha.getRangeByIndexes(0, 0, 1, COL_ESC.length);
+  r.setValues([COL_ESC]);
+  t = workbook.addTable(r, true); t.setName(T_ESC);
+  t.getColumnByName("Valor_Inicial").getRangeBetweenHeaderAndTotal().setNumberFormat("#,##0.00");
+  t.getColumnByName("Data Ultima Alteracao").getRangeBetweenHeaderAndTotal().setNumberFormat("dd/mm/yyyy hh:mm");
+  return t;
+}
+
+function gravarEscaloes(workbook: ExcelScript.Workbook, p: Pedido, utilizador: string): Resultado {
+  const erros: string[] = [];
+  const empresa = String(p.empresa || "").trim(), criterio = String(p.criterio || "").trim();
+  if (!empresa) erros.push("Escolha a empresa.");
+  if (CRITERIOS.indexOf(criterio) < 0) erros.push("Critério inválido.");
+  const faixas = Array.isArray(p.faixas) ? p.faixas : [];
+  if (!faixas.length || faixas.length > 50) erros.push("Defina entre 1 e 50 escalões.");
+  const nomes: string[] = [], inicios: number[] = [];
+  faixas.forEach((f, i) => {
+    const n = String(f.escalao ?? "").trim(), v = Number(f.inicio);
+    if (!n) erros.push("O escalão " + (i + 1) + " não tem nome.");
+    else if (nomes.indexOf(n.toUpperCase()) >= 0) erros.push("O nome «" + n + "» está repetido.");
+    nomes.push(n.toUpperCase());
+    if (!isFinite(v) || v < 0) erros.push("Valor inicial inválido no escalão " + (i + 1) + ".");
+    else if (inicios.indexOf(v) >= 0) erros.push("Dois escalões começam no mesmo valor (" + v + ").");
+    inicios.push(v);
+  });
+  if (erros.length) return {ok: false, accao: "escaloes", erro: erros.join(" "), erros};
+
+  const t = tabelaEscaloes(workbook);
+  limparFiltro(t);
+  const cab = cabecalho(t), iE = cab.indexOf("Empresa");
+  // Remove (de baixo para cima) as linhas desta empresa e acrescenta a nova definição.
+  const vals = dadosTabela(t);
+  for (let i = vals.length - 1; i >= 0; i--) {
+    if (textoCelula(vals[i][iE]).toUpperCase() === empresa.toUpperCase()) t.deleteRowsAt(i, 1);
+  }
+  const agora = agoraSerie();
+  const ordenadas = faixas.map(f => ({escalao: String(f.escalao).trim(), inicio: cent(Number(f.inicio))})).sort((a, b) => a.inicio - b.inicio);
+  const linhas = ordenadas.map((f, i) => linhaPorCabecalho(t, {
+    "Empresa": empresa, "Criterio": criterio, "Escalao": f.escalao, "Valor_Inicial": f.inicio, "Ordem": i + 1,
+    "Data Ultima Alteracao": agora, "Utilizador Alteracao": String(utilizador || "")
+  }));
+  inserir(t, linhas);
+  return {ok: true, accao: "escaloes", alteradas: linhas.length, listaEscaloes: ler(t)};
+}
+
+interface DefEscalao { criterio: string; faixas: Faixa[]; }
+function definicoesEscaloes(workbook: ExcelScript.Workbook): Map<string, DefEscalao> {
+  const mapa = new Map<string, DefEscalao>();
+  const t = workbook.getTable(T_ESC);
+  if (!t) return mapa;
+  const cab = cabecalho(t);
+  const iE = cab.indexOf("Empresa"), iC = cab.indexOf("Criterio"), iN = cab.indexOf("Escalao"), iV = cab.indexOf("Valor_Inicial");
+  dadosTabela(t).forEach(v => {
+    const e = textoCelula(v[iE]).toUpperCase(), n = textoCelula(v[iN]), x = Number(v[iV]);
+    if (!e || !n || textoCelula(v[iV]) === "" || !isFinite(x)) return;
+    let d = mapa.get(e);
+    if (!d) { d = {criterio: textoCelula(v[iC]) || "Salario Liquido", faixas: []}; mapa.set(e, d); }
+    d.faixas.push({escalao: n, inicio: x});
+  });
+  mapa.forEach(d => d.faixas.sort((a, b) => a.inicio - b.inicio));
+  return mapa;
+}
+function escalaoDe(mapa: Map<string, DefEscalao>, empresa: string, valorDe: (coluna: string) => Celula): string {
+  const d = mapa.get(empresa.toUpperCase()) || mapa.get("TODAS");
+  if (!d) return "";
+  const bruto = valorDe(d.criterio);
+  if (bruto === "" || bruto === null || bruto === undefined) return "";
+  const v = Number(bruto);
+  if (!isFinite(v)) return "";
+  let r = "";
+  d.faixas.forEach(f => { if (v >= f.inicio) r = f.escalao; });
+  return r;
+}
+
+function aplicarEscaloesMes(workbook: ExcelScript.Workbook, p: Pedido): Resultado {
+  const ano = Number(p.ano), mes = String(p.mesNome || "").trim().toUpperCase();
+  if (!Number.isInteger(ano) || !mes) return erro("Indique o ano e o mês.");
+  const mapa = definicoesEscaloes(workbook);
+  if (!mapa.size) return erro("Ainda não há escalões definidos.");
+  const t = workbook.getTable(T_LANC);
+  if (!t) return erro("Tabela tbl_lançamento não encontrada.");
+  const cab = cabecalho(t), j = cab.indexOf(COL_ESCALAO);
+  if (j < 0) return erro("A tbl_lançamento não tem a coluna «" + COL_ESCALAO + "».");
+  const col = t.getColumnByName(COL_ESCALAO).getRangeBetweenHeaderAndTotal();
+  if (col.getFormulas().some(f => String(f[0]).startsWith("="))) return erro("A coluna «" + COL_ESCALAO + "» tem fórmulas; não foi alterada.");
+  const vals = dadosTabela(t);
+  const iA = cab.indexOf("Ano"), iM = cab.indexOf("Mês"), iE = cab.indexOf("Empresa"), iS = cab.indexOf("Estado do Lançamento");
+  let alteradas = 0, semEscalao = 0, doMes = 0;
+  const novos: Celula[][] = vals.map(v => {
+    if (Number(v[iA]) !== ano || textoCelula(v[iM]).toUpperCase() !== mes) return [v[j]];
+    doMes++;
+    if (iS >= 0 && textoCelula(v[iS]).toUpperCase() === "FINALIZADO") return [v[j]];
+    const e = escalaoDe(mapa, textoCelula(v[iE]), c => { const k = cab.indexOf(c); return k >= 0 ? v[k] : ""; });
+    if (!e) semEscalao++;
+    if (textoCelula(v[j]) !== e) alteradas++;
+    return [e];
+  });
+  if (!doMes) return erro("Não há lançamentos para esse mês.");
+  if (alteradas) col.setValues(novos);
+  return {ok: true, accao: "escaloes", alteradas, semEscalao};
 }

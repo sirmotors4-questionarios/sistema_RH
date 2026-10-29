@@ -167,6 +167,20 @@ export async function colaboradoresChaves(deps = {}) {
   const r = resultadoScript(await callApi('colaboradores_chaves', {...deps, params: {dados: '{}'}}));
   return {preenchidas: Number(r.preenchidas) || 0, semCodigo: Number(r.semCodigo) || 0};
 }
+// Escalões salariais por empresa (tbl_escaloes_lancamento), pelo mesmo fluxo e script.
+const escaloesPedido = (dados, deps) => callApi('rh_escaloes', {...deps, params: {dados: JSON.stringify(dados)}}).then(resultadoScript);
+export async function escaloesLer(deps = {}) {
+  const r = await escaloesPedido({op: 'ler'}, deps);
+  return listaJson(r.listaEscaloes);
+}
+export async function escaloesGravar({empresa, criterio, faixas}, deps = {}) {
+  const r = await escaloesPedido({op: 'gravar', empresa, criterio, faixas}, deps);
+  return {gravados: Number(r.alteradas) || 0, linhas: listaJson(r.listaEscaloes)};
+}
+export async function escaloesAplicarMes({ano, mesNome}, deps = {}) {
+  const r = await escaloesPedido({op: 'aplicar', ano: Number(ano), mesNome}, deps);
+  return {alteradas: Number(r.alteradas) || 0, semEscalao: Number(r.semEscalao) || 0};
+}
 export async function adendaRegistar(pedido, deps = {}) {
   return resultadoScript(await callApi('adenda_registar', {...deps, params: {dados: JSON.stringify(pedido)}}));
 }
