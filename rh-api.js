@@ -167,8 +167,9 @@ export async function colaboradoresChaves(deps = {}) {
   const r = resultadoScript(await callApi('colaboradores_chaves', {...deps, params: {dados: '{}'}}));
   return {preenchidas: Number(r.preenchidas) || 0, semCodigo: Number(r.semCodigo) || 0};
 }
-// Escalões salariais por empresa (tbl_escaloes_lancamento), pelo mesmo fluxo e script.
-const escaloesPedido = (dados, deps) => callApi('rh_escaloes', {...deps, params: {dados: JSON.stringify(dados)}}).then(resultadoScript);
+// Escalões salariais por empresa (tbl_escaloes_lancamento), pelo mesmo fluxo e script. A acção é uma das que o
+// fluxo já aceita; o script reconhece os escalões por dados.modulo = "escaloes".
+const escaloesPedido = (dados, deps) => callApi('indemnizacoes_listar', {...deps, params: {dados: JSON.stringify({modulo: 'escaloes', ...dados})}}).then(resultadoScript);
 export async function escaloesLer(deps = {}) {
   const r = await escaloesPedido({op: 'ler'}, deps);
   return listaJson(r.listaEscaloes);
