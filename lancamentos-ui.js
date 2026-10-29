@@ -61,9 +61,11 @@ export function iniciarLancamentos(ctx) {
     const {ano, mes} = ctx.periodo();
     const filtros = ctx.filtros(), vista = ctx.vistaTabela();
     let brutas = F.filtrarFolha(ctx.lancamentosMes(), ano, mes, filtros);
+    if (vista.filtrar) brutas = vista.filtrar(brutas);   // filtros do cabeçalho da tabela
     if (!brutas.length) throw Error("Não existem lançamentos para os filtros seleccionados.");
     if (vista.ordem) brutas = LC.ordenar(M.lancamentos(brutas), vista.ordem.col, vista.ordem.dir).map(m => m.linha);
-    const ordemTexto = vista.ordem ? "Ordenado por " + vista.ordem.col.rotulo + " (" + (vista.ordem.dir === "asc" ? "crescente" : "decrescente") + ")" : "";
+    const ordemTexto = [vista.ordem ? "Ordenado por " + vista.ordem.col.rotulo + " (" + (vista.ordem.dir === "asc" ? "crescente" : "decrescente") + ")" : "",
+      vista.filtrosTexto ? "Filtro: " + vista.filtrosTexto : ""].filter(Boolean).join(" · ");
     const d = {ano, mes, filtros, ordemTexto, linhas: F.linhasFolha(brutas, ano, mes)};
     if (vista.personalizada) {
       const modelos = M.lancamentos(brutas), cols = vista.colunas;

@@ -10,7 +10,7 @@ import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizaco
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
-import {unirAdendas, escaloesPresentes, escalaoIgual, SEM_ESCALAO} from "./rh-folha.js";
+import {unirAdendas} from "./rh-folha.js";
 "use strict";
 
 // Sem sessão Microsoft: dados fictícios. Com sessão: dados do Excel via RH_API_Consultar (só leitura).
@@ -290,11 +290,63 @@ function renderAdendas(){
 let colunasLanc=LC.normalizar(LC.lerPreferencias(),[...LC.PADRAO]),catLanc=[...LC.PADRAO],arrastada=null;
 function mudarColunas(novo){colunasLanc=novo;LC.guardarPreferencias(colunasLanc);renderSalarios();renderPainelColunas()}
 function moverColuna(id,destino){const c=[...colunasLanc.colunas],i=c.indexOf(id);if(i<0||destino<0||destino>=c.length||i===destino)return;c.splice(i,1);c.splice(destino,0,id);mudarColunas({...colunasLanc,colunas:c})}
+// ---------- filtro do cabeçalho (ordenar + valores a mostrar, como no Excel) ----------
+let filtrosCab={},baseCab=[],porIdCab=new Map();
+function fecharFiltroCab(){const p=document.getElementById("pay-filtro");if(p)p.remove();document.removeEventListener("mousedown",foraFiltroCab,true)}
+function foraFiltroCab(e){const p=document.getElementById("pay-filtro");if(p&&!p.contains(e.target)&&!e.target.closest(".th-filtro"))fecharFiltroCab()}
+function abrirFiltroCab(c,th){
+ const ja=document.getElementById("pay-filtro");if(ja&&ja.dataset.col===c.id){fecharFiltroCab();return}fecharFiltroCab();
+ const valores=LC.valoresColuna(LC.filtrarCabecalho(baseCab,filtrosCab,porIdCab,c.id),c);
+ const sel=new Set(filtrosCab[c.id]||valores.map(v=>v.valor));
+ const p=document.createElement("div");p.id="pay-filtro";p.className="filtro-cab";p.dataset.col=c.id;p.setAttribute("role","dialog");p.setAttribute("aria-label","Filtrar "+c.rotulo);
+ const txt=c.tipo==="numero"?["Do menor para o maior","Do maior para o menor"]:c.tipo==="data"?["Da mais antiga para a mais recente","Da mais recente para a mais antiga"]:["De A a Z","De Z a A"];
+ const ordenar=dir=>{fecharFiltroCab();mudarColunas({...colunasLanc,ordem:{id:c.id,dir}})};
+ const b=(cls,t,fn)=>{const x=document.createElement("button");x.type="button";x.className=cls;x.textContent=t;x.addEventListener("click",fn);return x};
+ const o=colunasLanc.ordem&&colunasLanc.ordem.id===c.id?colunasLanc.ordem.dir:"";
+ const ord=document.createElement("div");ord.className="fc-ordem";
+ ord.append(b("fc-op"+(o==="asc"?" activo":""),"▲ "+txt[0],()=>ordenar("asc")),b("fc-op"+(o==="desc"?" activo":""),"▼ "+txt[1],()=>ordenar("desc")));
+ if(o)ord.append(b("fc-op","Retirar ordenação",()=>{fecharFiltroCab();mudarColunas({...colunasLanc,ordem:null})}));
+ const limpar=b("fc-op","✕ Limpar filtro de «"+c.rotulo+"»",()=>{delete filtrosCab[c.id];fecharFiltroCab();renderSalarios()});limpar.disabled=!filtrosCab[c.id];
+ const procura=document.createElement("input");procura.type="search";procura.placeholder="Procurar";procura.className="fc-procura";procura.setAttribute("aria-label","Procurar valores");
+ const lista=document.createElement("div");lista.className="fc-lista";
+ const tudo=document.createElement("label");tudo.className="fc-tudo";const ct=document.createElement("input");ct.type="checkbox";tudo.append(ct," (Seleccionar tudo)");
+ const ok=b("primary small","OK",aplicar),cancelar=b("outline small","Cancelar",fecharFiltroCab);
+ const visiveis=()=>{const q=procura.value.trim().toLowerCase();return valores.filter(v=>!q||(v.valor||"(vazias)").toLowerCase().includes(q))};
+ function desenhar(){
+  lista.replaceChildren();const vis=visiveis();
+  vis.slice(0,500).forEach(v=>{const l=document.createElement("label");const cb=document.createElement("input");cb.type="checkbox";cb.checked=sel.has(v.valor);
+   cb.addEventListener("change",()=>{cb.checked?sel.add(v.valor):sel.delete(v.valor);estado()});
+   const n=document.createElement("small");n.textContent=String(v.n);l.append(cb," ",v.valor===""?"(Vazias)":v.valor,n);lista.append(l)});
+  if(vis.length>500){const m=document.createElement("p");m.className="help";m.textContent="A mostrar 500 de "+vis.length+" valores; use «Procurar».";lista.append(m)}
+  if(!vis.length){const m=document.createElement("p");m.className="help";m.textContent="Nenhum valor.";lista.append(m)}
+  estado();
+ }
+ function estado(){const vis=visiveis(),n=vis.filter(v=>sel.has(v.valor)).length;ct.checked=n===vis.length&&n>0;ct.indeterminate=n>0&&n<vis.length;ok.disabled=n===0}
+ ct.addEventListener("change",()=>{visiveis().forEach(v=>ct.checked?sel.add(v.valor):sel.delete(v.valor));desenhar()});
+ procura.addEventListener("input",desenhar);
+ function aplicar(){
+  // Com pesquisa, como no Excel, ficam só os valores encontrados e marcados.
+  const q=procura.value.trim(),escolha=(q?visiveis():valores).filter(v=>sel.has(v.valor)).map(v=>v.valor);
+  if(!q&&escolha.length===valores.length)delete filtrosCab[c.id];else filtrosCab[c.id]=escolha;
+  fecharFiltroCab();renderSalarios();
+ }
+ const acc=document.createElement("div");acc.className="fc-accoes";acc.append(cancelar,ok);
+ const tit=document.createElement("b");tit.className="fc-titulo";tit.textContent=c.rotulo;
+ p.append(tit,ord,limpar,procura,tudo,lista,acc);
+ p.addEventListener("keydown",e=>{if(e.key==="Escape"){fecharFiltroCab();th.querySelector(".th-filtro")?.focus()}if(e.key==="Enter"&&e.target===procura&&!ok.disabled)aplicar()});
+ document.body.append(p);desenhar();
+ const r=th.getBoundingClientRect(),w=Math.min(300,innerWidth-24);p.style.width=w+"px";
+ p.style.left=Math.max(12,Math.min(r.left+scrollX,scrollX+innerWidth-w-12))+"px";p.style.top=(r.bottom+scrollY+4)+"px";
+ procura.focus();setTimeout(()=>document.addEventListener("mousedown",foraFiltroCab,true));
+}
 function renderCabecalhoLanc(cols,cat){
  catLanc=cat;const head=$("pay-head"),o=colunasLanc.ordem;
  cabecalhoOrdenavel(head,cols,o,c=>mudarColunas({...colunasLanc,ordem:LC.proximaOrdem(colunasLanc.ordem,c.id)}),(th,c)=>{
   const i=cols.indexOf(c);th.querySelector("button").title+=(c.origem==="funcionarios"?" · coluna do cadastro (tbl_funcionarios)":c.extra?" · coluna adicionada":"")+" · arraste para mudar de posição";
   if(c.extra)th.classList.add(c.origem==="funcionarios"?"col-cadastro":"col-extra");
+  const fb=document.createElement("button");fb.type="button";fb.className="th-filtro"+(filtrosCab[c.id]?" activo":"");fb.textContent="▾";
+  fb.title=filtrosCab[c.id]?"Filtrado · clique para alterar":"Ordenar e filtrar";fb.setAttribute("aria-label","Ordenar e filtrar «"+c.rotulo+"»");fb.setAttribute("aria-haspopup","dialog");
+  fb.addEventListener("click",e=>{e.stopPropagation();abrirFiltroCab(c,th)});th.querySelector(".th-ordem").after(fb);
   // arrastar o cabeçalho para outra posição
   th.draggable=true;
   th.addEventListener("dragstart",e=>{arrastada=c.id;th.classList.add("a-arrastar");e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",c.id)}catch{}});
@@ -349,25 +401,23 @@ function renderSalarios(){
  const emp=$("pay-company"),dep=$("pay-department"),col=$("pay-employee");cascata(lista,emp,dep);
  {const atual=col.value;const op=lista.filter(l=>(!emp.value||l.empresa===emp.value)&&(!dep.value||l.departamento===dep.value)).sort((a,b)=>a.codigo.localeCompare(b.codigo));
   col.replaceChildren(new Option("Todos",""),...op.map(l=>new Option(l.codigo+" · "+l.nome,l.codigo)));if(op.some(l=>l.codigo===atual))col.value=atual}
- // Escalão: opções do mês (filtradas pela empresa/departamento), mais «Sem escalão» quando há linhas sem ele.
- {const esc=$("pay-escalao"),atual=esc.value,base=lista.filter(l=>(!emp.value||l.empresa===emp.value)&&(!dep.value||l.departamento===dep.value)).map(l=>l.linha);
-  const nomes=escaloesPresentes(base),sem=base.some(l=>!String(M.campo(l,"Escalão")??"").trim());
-  esc.replaceChildren(new Option("Todos",""),...nomes.map(n=>new Option(n,n)),...(sem&&nomes.length?[new Option("Sem escalão",SEM_ESCALAO)]:[]));
-  esc.disabled=!nomes.length;esc.title=nomes.length?"":"Este mês ainda não tem escalões (Configurações → Escalões salariais).";
-  if([...esc.options].some(o=>o.value===atual))esc.value=atual}
- const result=M.filtrarColaboradores(lista,$("pay-search").value,"",{empresa:emp.value,departamento:dep.value}).filter(l=>(!col.value||l.codigo===col.value)&&escalaoIgual(l.linha,$("pay-escalao").value));
+ const doTopo=M.filtrarColaboradores(lista,$("pay-search").value,"",{empresa:emp.value,departamento:dep.value}).filter(l=>!col.value||l.codigo===col.value);
+ // Filtros no cabeçalho (como no Excel), sobre o resultado dos filtros de cima.
+ const cat=LC.catalogo(todas,dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[]),porId=new Map(cat.map(c=>[c.id,c]));
+ baseCab=doTopo;porIdCab=porId;
+ const result=LC.filtrarCabecalho(doTopo,filtrosCab,porId);
  $("pay-badge").textContent=M.NOME_MES[per.mes-1]+" "+per.ano+" · "+lista.length+" lançamento(s)";
  $("p-count").textContent=String(result.length);
  $("p-states").textContent=M.contagem(result,l=>l.estado).map(([k,n])=>k+": "+n).join(" · ")||"Sem lançamentos";
  $("p-acr").textContent=fmt(M.totais(result,"acrescimos"));$("p-desc").textContent=fmt(M.totais(result,"descontos"));$("p-liq").textContent=fmt(M.totais(result,"liquido"));
  // Colunas escolhidas pelo utilizador (estrutura padrão por omissão) e ordenação pelo cabeçalho.
- const cat=LC.catalogo(todas,dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[]),porId=new Map(cat.map(c=>[c.id,c]));
  colunasLanc=LC.normalizar(colunasLanc,cat);
  const cols=colunasLanc.colunas.map(id=>porId.get(id)).filter(Boolean);
  renderCabecalhoLanc(cols,cat);
  const ordem=colunasLanc.ordem,ordenada=ordem?LC.ordenar(result,porId.get(ordem.id),ordem.dir):result;
  const body=$("pay-body");body.replaceChildren();
  if(!result.length)emptyRow(body,cols.length,lista.length?"Nenhum lançamento corresponde aos filtros.":"Sem lançamentos para este mês.");
+ const nf=LC.filtrosActivos(filtrosCab);$("pay-filtros-limpar").hidden=!nf;$("pay-filtros-limpar").textContent="Limpar filtros ("+nf+")";
  ordenada.slice(0,MAX_LINHAS).forEach(l=>{const tr=document.createElement("tr");let tdNome=null,badge=null;
   cols.forEach(c=>{
    if(c.tipo==="estado"){stateCell(tr,l.estado);badge=tr.lastChild.firstChild;badge.classList.toggle("off",!/finaliz/i.test(l.estado));return}
@@ -415,7 +465,7 @@ $("employee-clear").addEventListener("click",()=>{["employee-search","employee-c
 $("pay-company").addEventListener("change",()=>{$("pay-department").value="";$("pay-employee").value="";renderSalarios()});
 $("pay-department").addEventListener("change",()=>{$("pay-employee").value="";renderSalarios()});
 $("pay-employee").addEventListener("change",renderSalarios);
-$("pay-escalao").addEventListener("change",renderSalarios);
+$("pay-filtros-limpar").addEventListener("click",()=>{filtrosCab={};fecharFiltroCab();renderSalarios()});
 $("addenda-search").addEventListener("input",renderAdendas);
 $("addenda-filter").addEventListener("change",renderAdendas);
 $("pay-search").addEventListener("input",renderSalarios);
@@ -462,7 +512,7 @@ function desligar(){
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();$("nav-acessos").hidden=true;$("nav-config").hidden=true;if(paginaActual==="acessos")go("dashboard");
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação";$("avatar").textContent="RH";$("avatar").title="";
  ["contratos","adendas","lancamentos","ferias"].forEach(p=>showLoaded(p,false));
- ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee","pay-escalao"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
+ ["employee-company","employee-department","employee-contract","pay-company","pay-department","pay-employee"].forEach(id=>$(id).value="");meses.clear();mesesCompletos=false;
  if(ficha.aberta())document.getElementById("ficha").close();
  render();
 }
@@ -558,10 +608,12 @@ const lanc=iniciarLancamentos({
  periodo:()=>dados.lancamentos?.periodo||{ano:Number(year.value),mes:Number(month.value)},
  periodoMaisRecente:()=>dados.lancamentos?.periodo||null,
  lancamentosMes:()=>{const p=dados.lancamentos?.periodo;return p?doPeriodo(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes):[]},
- filtros:()=>({empresa:$("pay-company").value,departamento:$("pay-department").value,codigo:$("pay-employee").value,escalao:$("pay-escalao").value}),
+ filtros:()=>({empresa:$("pay-company").value,departamento:$("pay-department").value,codigo:$("pay-employee").value}),
  // A folha segue a tabela: mesma ordenação e, se a estrutura foi alterada, as mesmas colunas pela mesma ordem.
  vistaTabela:()=>{const cat=LC.catalogo(linhas("lancamentos","tbl_lançamento"),dados.funcionarios?linhas("funcionarios","tbl_funcionarios"):[]),porId=new Map(cat.map(c=>[c.id,c]));const p=LC.normalizar(colunasLanc,cat);
-  return {colunas:p.colunas.map(id=>porId.get(id)).filter(Boolean),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null})}},
+  return {colunas:p.colunas.map(id=>porId.get(id)).filter(Boolean),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null}),
+   filtrar:brutas=>LC.filtrarCabecalho(M.lancamentos(brutas),filtrosCab,porId).map(m=>m.linha),
+   filtrosTexto:Object.entries(filtrosCab).filter(([id])=>porId.has(id)).map(([id,v])=>porId.get(id).rotulo+": "+(v.length>3?v.length+" valores":v.map(x=>x||"(vazias)").join(", "))).join(" · ")}},
  carregarMes,esquecerMes:(a,m)=>{meses.delete(a+"-"+m);mesesCompletos=false},
  funcionarios:()=>carregar("funcionarios").then(()=>linhas("funcionarios","tbl_funcionarios")),
  contratos:()=>carregar("contratos").then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),
