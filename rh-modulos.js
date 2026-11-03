@@ -382,9 +382,16 @@ export function prepararGravacao(modo, dados, {original = {}, cabecalhos = [], u
   return {alvo, chave: chaveRH(alvo.Empresa, alvo.Codigo), dados: saida, alteracoes, ignorados};
 }
 
+// Campos de saída são aplicáveis apenas a colaboradores explicitamente inactivos.
+export function campoVisivel(c, valores = {}) {
+  if (!['Data de Saída', 'Motivo'].includes(c.k)) return true;
+  return ['inactivo', 'inativo', 'inactive'].includes(chave(valores.Estado));
+}
+
 // Indicador de preenchimento (VBA: 0–49% Baixo, 50–79% Médio, 80–100% Bom).
+// O denominador e o numerador consideram apenas os campos visíveis no estado actual.
 export function preenchimento(valores, sep) {
-  const campos = CAMPOS_COLABORADOR.filter(c => !sep || c.sep === sep);
+  const campos = CAMPOS_COLABORADOR.filter(c => (!sep || c.sep === sep) && campoVisivel(c, valores));
   const total = campos.length, cheios = campos.filter(c => texto(valores[c.k])).length;
   const pct = total ? Math.round(cheios / total * 100) : 0;
   return {preenchidos: cheios, total, pct, nivel: !total ? 'Sem campos' : pct < 50 ? 'Baixo' : pct < 80 ? 'Médio' : 'Bom'};
