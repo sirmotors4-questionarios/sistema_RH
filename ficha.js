@@ -130,8 +130,24 @@ export function criarFicha(ctx) {
     est.hidden = !v.Estado; est.textContent = v.Estado; est.classList.toggle("off", !M.activo(v.Estado));
   }
 
+  // Os campos de saída só existem visualmente para colaboradores inactivos.
+  // Mantemos os valores originais no formulário para não apagar dados históricos ao alternar o estado.
+  function actualizarVisibilidadeSaida(v) {
+    for (const campo of ["Data de Saída", "Motivo"]) {
+      const input = inputs().find(i => i.dataset.campo === campo);
+      if (!input) continue;
+      const label = input.closest("label");
+      const visivel = M.campoVisivel({k: campo}, v);
+      if (label) {
+        label.hidden = !visivel;
+        label.style.display = visivel ? "" : "none";
+      }
+    }
+  }
+
   function indicadores() {
     const v = valores();
+    actualizarVisibilidadeSaida(v);
     M.SEPARADORES.forEach(s => {
       const chip = tabs.querySelector('[data-pct="' + s.id + '"]');
       if (s.id === "contrato") { chip.textContent = ""; return; }
