@@ -256,7 +256,7 @@ export function iniciarLancamentos(ctx) {
     const regime = String(v("RegimePagamento") || "");
     const hora = /^hora$/i.test(regime.trim());
     const fechado = F.lancamentoFinalizado(original), pode = ctx.podeGravar();
-    abrir({eyebrow: "LANÇAMENTO · " + M.NOME_MES[mes - 1].toUpperCase() + " " + ano, titulo: M.normalizarCodigo(v("Codigo")) + " · " + (v("Nome") || ""),
+    const t = abrir({eyebrow: "LANÇAMENTO · " + M.NOME_MES[mes - 1].toUpperCase() + " " + ano, titulo: M.normalizarCodigo(v("Codigo")) + " · " + (v("Nome") || ""),
       sub: [v("Empresa"), v("Departamento"), regime, v("Estado do Lançamento") || "—"].filter(Boolean).join("  ·  ")});
     const num = x => { const n = M.numero(x); return n == null ? "—" : fmt(n); };
     const entrada = c => {
@@ -280,22 +280,60 @@ export function iniciarLancamentos(ctx) {
       el("div", {class: "le-form"},
         grupo("Presença", c => !c.grupo && c.tipo !== "texto"), grupo("Acréscimos", c => c.grupo === "acrescimo"), grupo("Descontos", c => c.grupo === "desconto"),
         grupo("Observações", c => c.tipo === "texto")),
+      el("div", {id: "le-recalculo", role: "status", "aria-live": "polite"}),
       campoUrl());
     const canal = $("le-Canalizar"); if (canal) canal.value = ["Sim", "Não"].includes(String(v("Canalizar"))) ? String(v("Canalizar")) : "";
-    const lista = [{texto: "Fechar", click: fechar}];
-    if (!fechado && pode) lista.unshift({texto: "Gravar alteração", classe: "primary", ocupado: "A gravar…", click: async () => {
-      const valores = Object.fromEntries(F.CAMPOS_EDITAVEIS.map(c => [c.k, $("le-" + c.k)?.value ?? ""]));
-      const [funcionarios, contratos] = await Promise.all([ctx.funcionarios(), ctx.contratos()]);
+    let emCurso = false;
+    const consultar = async () => {
+      const [funcionarios, contratos] = await Promise.all([ctx.funcionarios(true), ctx.contratos(true)]);
+      if (t !== tarefa) return null;
+      if (!ctx.podeGravar()) throw Error("O seu perfil já não permite alterar lançamentos.");
       const chave = M.chaveRH(v("Empresa"), v("Codigo"));
-      const funcionario = funcionarios.find(f => M.chaveRH(M.campo(f, "Empresa"), M.campo(f, "Codigo")) === chave);
-      const r = F.prepararEdicaoLancamento({original, valores, funcionario, adendas: contratos.adendas, parametros: contratos.parametros, ano, mes, utilizador: ctx.utilizador()});
+      const encontrados = funcionarios.filter(f => M.chaveRH(M.campo(f, "Empresa"), M.campo(f, "Codigo")) === chave);
+      if (encontrados.length !== 1) throw Error("É necessário um único colaborador para " + chave + ". Encontrados: " + encontrados.length + ".");
+      return {original, funcionario: encontrados[0], adendas: contratos.adendas, parametros: contratos.parametros, ano, mes, utilizador: ctx.utilizador()};
+    };
+    const exclusivo = acao => async () => {
+      if (emCurso) return;
+      emCurso = true;
+      try { await acao(); } catch (e) { if (t === tarefa) throw e; } finally { emCurso = false; }
+    };
+    const lista = [{texto: "Fechar", click: fechar}];
+    if (!fechado && pode) lista.unshift({texto: "Recalcular colaborador", ocupado: "A recalcular…", click: exclusivo(async () => {
+      $("le-recalculo").replaceChildren();
+      const opcoes = await consultar();
+      if (!opcoes) return;
+      const r = F.prepararRecalculoLancamento(opcoes);
+      if (r.erros.length) { $("le-recalculo").replaceChildren(); throw Error(r.erros.join(" ")); }
+      const cp = r.condicoes;
+      const horas = $("le-Horas Trabalhadas");
+      horas.disabled = !/^hora$/i.test(cp.regime.trim());
+      horas.placeholder = horas.disabled ? "Só regime Hora" : "0";
+      const dt = d => d ? d.split("-").reverse().join("/") : "Sem data final";
+      $("le-recalculo").replaceChildren(
+        el("h3", {text: "Recálculo do colaborador — por gravar"}),
+        tabela(["Condição", "No lançamento", "Actualizada"], [
+          ["Regime", regime, cp.regime],
+          ["Início do contrato", M.data(v("Data Inicio Contrato")) || "—", cp.inicioContrato ? dt(cp.inicioContrato) : "Não indicada"],
+          ["Fim do contrato", M.data(v("Data Fim Contrato")) || "—", dt(cp.fimContrato)],
+          ["Dias trabalhados", num(v("Dias Trabalhados")), cp.dias === null ? "Mantidos; dependem da presença registada" : num(cp.dias)],
+          ["Valor unitário", num(v("Valor Unitário")), fmt(cp.valorUnitario) + " " + cp.unidade]]),
+        el("p", {class: "help", text: "Período: " + dt(r.periodo.inicio) + " a " + dt(r.periodo.fim) + ". Origem do valor: " + cp.origem +
+          ". Clique em «Gravar alteração» para aplicar a este colaborador, incluindo as entradas editadas acima. O vencimento, INSS, IRPS e líquido serão actualizados após a gravação. Os totais no topo ainda são os valores gravados."}));
+    })});
+    if (!fechado && pode) lista.unshift({texto: "Gravar alteração", classe: "primary", ocupado: "A gravar…", click: exclusivo(async () => {
+      const opcoes = await consultar();
+      if (!opcoes) return;
+      const valores = Object.fromEntries(F.CAMPOS_EDITAVEIS.map(c => [c.k, $("le-" + c.k)?.value ?? ""]));
+      const chave = M.chaveRH(v("Empresa"), v("Codigo"));
+      const r = F.prepararEdicaoLancamento({...opcoes, valores});
       if (r.erros.length) throw Error(r.erros.join(" "));
       guardarUrlSePreciso();
       // O Excel Online demora ~15–20 s: a janela fecha já e a gravação continua em segundo plano,
       // com os segundos a contar na linha da tabela (ver gravarEmFundo em app.js).
       fechar();
       ctx.gravarEmFundo({ano, mes, chave, pedido: {ano, mes, mesNome: M.NOME_MES[mes - 1], linha: r.linha}});
-    }});
+    })});
     accoes(lista);
   }
 

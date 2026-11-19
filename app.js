@@ -124,7 +124,7 @@ const fmt=n=>new Intl.NumberFormat("pt-MZ",{minimumFractionDigits:2,maximumFract
 function carregar(modulo,forcar=false){
  if(modulo==="lancamentos")return carregarLancamentos(forcar?{ano:Number(year.value),mes:Number(month.value)}:null);
  if(!forcar&&dados[modulo])return Promise.resolve(dados[modulo]);
- if(pedidos[modulo])return pedidos[modulo];
+ if(pedidos[modulo])return forcar?pedidos[modulo].then(()=>carregar(modulo,true)):pedidos[modulo];
  setSource(modulo,modulo==="lancamentos"?"A carregar (1800+ lançamentos; pode demorar cerca de 1 minuto)…":"A carregar…");
  pedidos[modulo]=loadModulo(modulo,transporte()).then(r=>{
   dados[modulo]={tabelas:r.tabelas,carregado:new Date()};
@@ -615,8 +615,8 @@ const lanc=iniciarLancamentos({
    filtrar:brutas=>LC.filtrarCabecalho(M.lancamentos(brutas),filtrosCab,porId).map(m=>m.linha),
    filtrosTexto:Object.entries(filtrosCab).filter(([id])=>porId.has(id)).map(([id,v])=>porId.get(id).rotulo+": "+(v.length>3?v.length+" valores":v.map(x=>x||"(vazias)").join(", "))).join(" · ")}},
  carregarMes,esquecerMes:(a,m)=>{meses.delete(a+"-"+m);mesesCompletos=false},
- funcionarios:()=>carregar("funcionarios").then(()=>linhas("funcionarios","tbl_funcionarios")),
- contratos:()=>carregar("contratos").then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),
+ funcionarios:forcar=>carregar("funcionarios",forcar).then(()=>linhas("funcionarios","tbl_funcionarios")),
+ contratos:forcar=>carregar("contratos",forcar).then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),
  podeGravar,utilizador:()=>sessaoAcesso()?.email||"",urlGravacao,guardarUrlGravacao,
  gravarMes:pedido=>gravarNovoMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
  gravarLancamento:pedido=>gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
