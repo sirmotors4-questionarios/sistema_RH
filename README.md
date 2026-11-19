@@ -131,3 +131,18 @@ Browser (GitHub Pages) --MSAL / Microsoft Entra--> token (aud https://service.fl
 
 ### Verificação
 `node --test tests/rh-integration.test.mjs tests/rh-api.test.mjs tests/rh-modulos.test.mjs tests/rh-acesso.test.mjs`
+
+### Recalcular um colaborador no mês carregado
+Abra a linha do colaborador em Lançamento salarial e clique em **Recalcular colaborador**.
+O site volta a consultar o cadastro, adendas e parâmetros de pagamento, apresenta as datas,
+o regime, o valor unitário e os dias actualizados para o período 21–20. Clique em
+**Gravar alteração** para aplicar apenas a esse colaborador; as entradas do formulário
+(faltas, horas, subsídios e descontos) são mantidas e gravadas juntamente com o recálculo.
+A gravação também volta a consultar as condições, mesmo sem usar o botão de prévia.
+
+Mantém as regras existentes: regime Mensal com base de 30 dias e proporcional por
+admissão/saída; Hora/Diário com tarifa vigente e presença registada, sem inferir horas
+ou dias trabalhados. Vencimento, INSS, IRPS e líquido são calculados pelo Excel e
+actualizados na linha após resposta do fluxo existente `lancamento_editar`.
+Lançamentos finalizados, colaborador ambíguo, período incorrecto e contrato sem vigência
+bloqueiam a alteração. Não requer uma nova acção do Power Automate.

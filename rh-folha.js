@@ -165,18 +165,38 @@ export const lancamentoFinalizado = l => igual(campo(l, "Estado do Lançamento")
 
 // Devolve {erros, linha}: linha = pedido para o script (modo "editar") com as entradas mensais
 // e as condições de pagamento sincronizadas com o contrato/adendas, como o VBA faz ao gravar.
-export function prepararEdicaoLancamento({original, valores, funcionario, adendas = [], parametros = [], ano, mes, utilizador = "", agora = new Date()}) {
-  const erros = [];
+export function prepararRecalculoLancamento({original, funcionario, adendas = [], parametros = [], ano, mes, utilizador = "", agora = new Date()}) {
   if (!original) return {erros: ["Lançamento não encontrado."]};
   if (lancamentoFinalizado(original)) return {erros: ["Este lançamento está Finalizado e não pode ser alterado."]};
+  if (!Number.isInteger(Number(ano)) || Number(ano) < 1900 || Number(ano) > 9999 ||
+      !Number.isInteger(Number(mes)) || Number(mes) < 1 || Number(mes) > 12 || !periodoIgual(original, ano, mes))
+    return {erros: ["O lançamento não pertence ao período seleccionado."]};
   const empresa = texto(campo(original, "Empresa")), codigo = normalizarCodigo(campo(original, "Codigo"));
   if (!empresa || !codigo) return {erros: ["Lançamento sem Empresa/Código."]};
-  if (!funcionario) return {erros: ["Colaborador não encontrado: " + empresa + " | " + codigo + "."]};
+  if (!funcionario || chaveRH(campo(funcionario, "Empresa"), campo(funcionario, "Codigo")) !== chaveRH(empresa, codigo))
+    return {erros: ["Colaborador não encontrado: " + empresa + " | " + codigo + "."]};
   const per = periodoFolha(Number(ano), Number(mes));
-  const cp = condicoesPagamento(funcionario, adendas, parametros, per);
+  const contrato = contratoNoPeriodo(funcionario, adendas, per);
+  if (!contrato.vigente) return {erros: [contrato.motivo + " Reveja o contrato antes de actualizar este lançamento."]};
+  const cp = condicoesPagamento(funcionario, adendas, parametros, per, contrato);
   if (cp.erro) return {erros: [cp.erro]};
+  const linha = {Empresa: empresa, Codigo: codigo, RegimePagamento: cp.regime,
+    "Valor Unitário": cp.valorUnitario,
+    "Data Inicio Contrato": cp.inicioContrato ? Number(serie(cp.inicioContrato)) : "",
+    "Data Fim Contrato": cp.fimContrato ? Number(serie(cp.fimContrato)) : "",
+    "Data Ultima Alteracao": Math.round(((agora.getTime() - agora.getTimezoneOffset() * 60000) / 86400000 + 25569) * 100000) / 100000,
+    "Utilizador Alteracao": utilizador};
+  if (cp.dias !== null) linha["Dias Trabalhados"] = cp.dias;
+  return {erros: [], linha, condicoes: cp, periodo: per};
+}
+
+export function prepararEdicaoLancamento(opcoes) {
+  const {valores} = opcoes;
+  const r = prepararRecalculoLancamento(opcoes);
+  if (r.erros.length) return r;
+  const {linha, condicoes: cp} = r;
+  const erros = [];
   const hora = igual(cp.regime, "Hora");
-  const linha = {Empresa: empresa, Codigo: codigo};
   for (const c of CAMPOS_EDITAVEIS) {
     const v = valores[c.k];
     if (c.tipo === "simnao") {
@@ -191,13 +211,6 @@ export function prepararEdicaoLancamento({original, valores, funcionario, adenda
       linha[c.k] = x;
     }
   }
-  linha.RegimePagamento = cp.regime;
-  linha["Valor Unitário"] = cp.valorUnitario;
-  linha["Data Inicio Contrato"] = cp.inicioContrato ? Number(serie(cp.inicioContrato)) : "";
-  linha["Data Fim Contrato"] = cp.fimContrato ? Number(serie(cp.fimContrato)) : "";
-  if (cp.dias !== null) linha["Dias Trabalhados"] = cp.dias;
-  linha["Data Ultima Alteracao"] = Math.round(((agora.getTime() - agora.getTimezoneOffset() * 60000) / 86400000 + 25569) * 100000) / 100000;
-  linha["Utilizador Alteracao"] = utilizador;
   return {erros, linha, condicoes: cp};
 }
 

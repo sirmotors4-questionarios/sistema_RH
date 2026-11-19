@@ -198,3 +198,57 @@ test('filtro de escalão na folha e lista de escalões por ordem natural', async
   assert.deepEqual(F.filtrarFolha(l, 2026, 10, {escalao: F.SEM_ESCALAO}).map(x => x.Codigo), ['4']);
   assert.equal(F.filtrarFolha(l, 2026, 10, {}).length, 4);
 });
+
+
+test('recálculo individual usa admissão corrigida e adenda sem apagar entradas nem escrever fórmulas', () => {
+  const original = {Empresa: 'A', Codigo: '0031', Ano: '2026', 'Mês': 'Abril',
+    'Estado do Lançamento': 'Pendente', 'Dias Trabalhados': '30', 'Valor Unitário': '20000',
+    'Faltas Injustificadas': '2', 'Subsídios': '700', 'Horas Extras': '3', 'Observações': 'Preservar'};
+  const funcionario = {Empresa: 'A', Codigo: '31', Estado: 'Activo', TipoContrato: 'Efectivo',
+    RegimePagamento: 'Mensal', 'Vencimento Base': '20000', 'Data Admissao': S('2026-04-11')};
+  const adendas = [{Empresa: 'A', Codigo: '31', Estado_Adenda: 'Activa',
+    Campo_Alterado: 'Vencimento Base', Valor_Novo: '24000', Data_Inicio_Vigencia: S('2026-04-01')}];
+  const antes = structuredClone(original);
+  const r = F.prepararRecalculoLancamento({original, funcionario, adendas, ano: 2026, mes: 4, utilizador: 'teste'});
+  assert.deepEqual(r.erros, []);
+  assert.equal(r.linha['Dias Trabalhados'], 10);
+  assert.equal(r.linha['Valor Unitário'], 24000);
+  assert.equal(r.linha['Data Inicio Contrato'], Number(S('2026-04-11')));
+  assert.equal(r.linha.Empresa, 'A');
+  assert.equal(r.linha.Codigo, '0031');
+  assert.deepEqual(original, antes);
+  for (const k of [...F.FORMULAS_LANCAMENTO, ...F.CAMPOS_EDITAVEIS.map(c => c.k)]) assert.ok(!(k in r.linha), k);
+});
+
+test('recálculo bloqueia período, identidade, fecho e contrato fora de vigência', () => {
+  const original = {Empresa: 'A', Codigo: '1', Ano: '2026', 'Mês': 'Abril', 'Estado do Lançamento': 'Pendente'};
+  const funcionario = {Empresa: 'A', Codigo: '1', Estado: 'Activo', TipoContrato: 'Efectivo',
+    RegimePagamento: 'Mensal', 'Vencimento Base': '10000', 'Data Admissao': S('2020-01-01')};
+  const base = {original, funcionario, ano: 2026, mes: 4};
+  for (const mudanca of [
+    {mes: 5}, {mes: 0}, {ano: 'inválido'},
+    {funcionario: {...funcionario, Empresa: 'B'}},
+    {original: {...original, 'Estado do Lançamento': 'Finalizado'}},
+    {funcionario: {...funcionario, 'Data Admissao': S('2026-04-21')}},
+    {funcionario: {...funcionario, Estado: 'Inactivo', 'Data de Saída': S('2026-03-20')}}
+  ]) {
+    const r = F.prepararRecalculoLancamento({...base, ...mudanca});
+    assert.ok(r.erros.length);
+    assert.equal(r.linha, undefined);
+  }
+});
+
+test('recálculo Hora e Diário actualiza tarifa sem inventar presença', () => {
+  for (const regime of ['Hora', 'Diário']) {
+    const original = {Empresa: 'A', Codigo: '1', Ano: '2026', 'Mês': 'Abril',
+      'Estado do Lançamento': 'Pendente', 'Horas Trabalhadas': '88', 'Dias Trabalhados': '12'};
+    const funcionario = {Empresa: 'A', Codigo: '1', Estado: 'Activo', TipoContrato: 'Efectivo',
+      RegimePagamento: regime, Profissao: 'Motorista', 'Data Admissao': S('2020-01-01')};
+    const parametros = [{RegimePagamento: regime, Categoria: 'Motorista', Valor_Unitario: '100', Vigencia_Inicio: S('2026-01-01'), Activo: 'Sim'}];
+    const r = F.prepararRecalculoLancamento({original, funcionario, parametros, ano: 2026, mes: 4});
+    assert.deepEqual(r.erros, []);
+    assert.equal(r.linha['Valor Unitário'], 100);
+    assert.ok(!('Horas Trabalhadas' in r.linha));
+    assert.ok(!('Dias Trabalhados' in r.linha));
+  }
+});
