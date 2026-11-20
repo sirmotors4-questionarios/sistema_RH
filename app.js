@@ -5,11 +5,12 @@ import * as AD from "./adendas-ui.js";
 import * as LC from "./lancamentos-colunas.js";
 import {iniciarPainel} from "./painel.js";
 import {iniciarAcessos} from "./acessos-ui.js";
-import {loadModulo, loadConfiguracoes, acessoTrocar, PODE_TROCAR_CODIGO, acessosListar, acessosGravar, acessosCodigo, gravarColaborador, gravarNovoMes, gravarLancamento, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
+import {loadModulo, loadConfiguracoes, acessoTrocar, PODE_TROCAR_CODIGO, acessosListar, acessosGravar, acessosCodigo, gravarColaborador, gravarNovoMes, gravarLancamento, operarLancamentos, finalizarMes, indemnizacoesListar, adendaRegistar, adendaAplicar, adendaRevogar, colaboradoresChaves} from "./rh-api.js";
 import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizacoes, urlGuardada, sessaoAcesso, entrarComCodigo, sairAcesso, chaveAcesso, validarEmail, validarCodigo, CODIGO_MINIMO, actualizarChaveSessao, gerarCodigoTemporario, linkConfiguracao, lerConfiguracaoDoLink} from "./rh-acesso.js";
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
+import {prepararPendentes} from "./rh-pendentes.js";
 import {unirAdendas} from "./rh-folha.js";
 "use strict";
 
@@ -56,6 +57,7 @@ function showToast(message){const t=$("toast");t.textContent=message;t.classList
 // assim nenhuma alteração se perde nem é tapada por uma leitura feita antes de ela chegar ao Excel.
 const pendentes=new Map(); // "ano-mes|Empresa|Codigo" -> {inicio, emFila, fim?, erro?}
 let filaGravacao=Promise.resolve();
+let operacaoMes=false;
 const segs=ms=>Math.max(0,Math.round(ms/1000));
 function rotuloPendente(p){if(p.erro)return"Erro ao gravar";if(p.fim)return"Gravado · "+segs(p.fim-p.inicio)+" s";return(p.emFila?"Na fila… ":"A gravar… ")+segs(Date.now()-p.inicio)+" s"}
 function gravacaoActiva(k){const p=pendentes.get(k);return Boolean(p&&!p.fim&&!p.erro)}
@@ -74,6 +76,7 @@ async function relerMesSeLivre(ano,mes){
  renderSalarios();
 }
 function gravarEmFundo({ano,mes,chave,pedido}){
+ if(operacaoMes){showToast("Aguarde a operação do mês terminar.");return}
  const k=ano+"-"+mes+"|"+chave,quem=chave.replace("|"," | ");
  if(gravacaoActiva(k)){showToast("Este lançamento ainda está a ser gravado.");return}
  const naFila=[...pendentes.keys()].filter(gravacaoActiva).length;
@@ -427,7 +430,7 @@ function renderSalarios(){
    if(badge){badge.dataset.pendente=pk;badge.textContent=rotuloPendente(pp);badge.classList.add(cls);if(pp.erro)badge.title=pp.erro}
    if(tdNome){const n=document.createElement("small");n.className="pend state "+cls;n.dataset.pendente=pk;n.textContent=rotuloPendente(pp);if(pp.erro)n.title=pp.erro;tdNome.append(n)}
    tr.classList.add("linha-"+cls)}
-  tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>gravacaoActiva(pk)?showToast("Este lançamento ainda está a ser gravado ("+segs(Date.now()-pp.inicio)+" s)."):lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
+  tr.classList.add("clickable");tr.tabIndex=0;tr.title="Abrir lançamento";const abre=()=>operacaoMes?showToast("Aguarde a operação do mês terminar."):gravacaoActiva(pk)?showToast("Este lançamento ainda está a ser gravado ("+segs(Date.now()-pp.inicio)+" s)."):lanc.editar(l.linha);tr.addEventListener("click",abre);tr.addEventListener("keydown",e=>{if(e.key==="Enter")abre()});body.append(tr)});
  const foot=$("pay-foot");foot.replaceChildren();
  if(result.length){const tr=document.createElement("tr");let rotulo=false;
   cols.forEach(c=>{if(c.tipo==="numero"&&c.total){cell(tr,fmt(LC.somar(result,c)),{num:true,strong:true});return}
@@ -475,7 +478,41 @@ M.NOME_MES.forEach((m,i)=>{const op=document.createElement("option");op.value=St
 const now=new Date();month.value=String(now.getMonth()+1);
 for(let y=now.getFullYear()-2;y<=now.getFullYear()+1;y++){const op=document.createElement("option");op.value=String(y);op.textContent=String(y);year.appendChild(op)}year.value=String(now.getFullYear());
 [month,year].forEach(s=>s.addEventListener("change",()=>{if(ligado)carregarLancamentos({ano:Number(year.value),mes:Number(month.value)}).catch(()=>{});else renderSalarios()}));
-$("load-month").addEventListener("click",()=>{if(!ligado){abrirAcesso();return}carregar("lancamentos",true)});
+// Só o clique explícito em Carregar mês recalcula. Consultas, relatórios e refresh pós-gravação não escrevem.
+async function operarMes(acao) {
+ if(operacaoMes || [...pendentes.keys()].some(gravacaoActiva))throw Error("Aguarde as gravações em curso antes de continuar.");
+ operacaoMes=true;
+ const controles=[month,year,$("load-month"),$("novo-mes"),$("btn-finalizar")];
+ const estados=controles.map(b=>b.disabled), botao=$("load-month"), texto=botao.textContent;
+ controles.forEach(b=>b.disabled=true);
+ try{return await acao()}finally{operacaoMes=false;controles.forEach((b,i)=>b.disabled=estados[i]);botao.textContent=texto}
+}
+$("load-month").addEventListener("click",async()=>{
+ if(!ligado){abrirAcesso();return}
+ try{await operarMes(async()=>{
+  const ano=Number(year.value),mes=Number(month.value),sessao=sessaoAcesso();
+  $("load-month").textContent="A carregar…";
+  if(pedidos.lancamentos)await pedidos.lancamentos;
+  await carregarLancamentos({ano,mes});
+  if(!podeGravar()){showToast("Mês carregado em consulta. O seu perfil não permite recalcular.");return}
+  if(!sessao)throw Error("Inicie sessão com o código de acesso para recalcular lançamentos.");
+  if(!urlGravacao())throw Error("Mês carregado, sem recálculo: configure o endereço RH_API_Actualizar numa ficha de lançamento.");
+  $("load-month").textContent="A recalcular Pendentes…";
+  await Promise.all([carregar("funcionarios",true),carregar("contratos",true)]);
+  if(!ligado||sessaoAcesso()?.chave!==sessao?.chave||sessaoAcesso()?.email!==sessao?.email||!podeGravar())throw Error("A sessão mudou. Carregue novamente o mês.");
+  const r=prepararPendentes({ano,mes,lancamentos:doPeriodo(linhas("lancamentos","tbl_lançamento"),ano,mes),
+   funcionarios:linhas("funcionarios","tbl_funcionarios"),
+   adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),
+   parametros:linhas("contratos","tbl_parametros_pagamento"),utilizador:sessao?.email||""});
+  if(r.erros.length)throw Error("Recálculo não efectuado: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+" bloqueio(s).":""));
+  if(!r.linhas.length){showToast("Mês carregado. Não existem lançamentos Pendentes para recalcular.");return}
+  const res=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:M.NOME_MES[mes-1],atualizacoes:r.linhas,utilizador:sessao.email},
+   {credenciais:sessao,url:urlGravacao()});
+  meses.delete(ano+"-"+mes);mesesCompletos=false;
+  await carregarLancamentos({ano,mes});
+  showToast(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
+ })}catch(e){setSource("lancamentos",e.message);showToast(e.message)}
+});
 
 // ---------- sessão ----------
 // Dois caminhos: código de acesso pessoal (fluxo RH_API_Acesso, independente do Entra)
@@ -621,6 +658,14 @@ const lanc=iniciarLancamentos({
  gravarMes:pedido=>gravarNovoMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
  gravarLancamento:pedido=>gravarLancamento(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
  gravarEmFundo,
+ reporInicial:({ano,mes,Empresa,Codigo})=>operarMes(async()=>{
+  if(!podeGravar())throw Error("O seu perfil não permite repor lançamentos.");
+  const r=await operarLancamentos("repor_inicial",{ano,mes,mesNome:M.NOME_MES[mes-1],Empresa,Codigo,utilizador:sessaoAcesso()?.email||""},
+   {credenciais:sessaoAcesso(),url:urlGravacao()});
+  meses.delete(ano+"-"+mes);mesesCompletos=false;
+  await carregarLancamentos({ano,mes});
+  return r;
+ }),
  finalizarMes:pedido=>finalizarMes(pedido,{credenciais:sessaoAcesso(),url:urlGravacao()}),
  recarregarMes:(ano,mes)=>{meses.delete(ano+"-"+mes);mesesCompletos=false;carregarLancamentos({ano,mes}).catch(()=>{})},
  mostrarMes:(ano,mes)=>{year.value=String(ano);month.value=String(mes);carregarLancamentos({ano,mes}).catch(()=>{})},
