@@ -1,8 +1,45 @@
-# Office Scripts — gravação em lote (rascunho)
+# Office Scripts — lançamentos salariais
+
+## Activar recálculo de Pendentes e reposição (v2)
+
+1. No Excel/Microsoft 365, abra o script **LancamentoNovoMes** efectivamente usado pela
+   acção Run script do fluxo **RH_API_Actualizar**. Substitua o conteúdo pelo ficheiro
+   [LancamentoNovoMes.ts](LancamentoNovoMes.ts) desta versão e guarde.
+2. No ramo **lancamento_editar**, confirme que o script recebe `modo = editar`,
+   `ano = triggerBody()?['ano']`, `mes = triggerBody()?['mesNome']` e
+   `linhas = string(triggerBody()?['linhas'])`, sem filtrar propriedades das linhas.
+   A resposta deve preservar **ok, erros e linha** do resultado do script.
+   Não são necessárias acções HTTP adicionais, nem novos parâmetros do script.
+3. Valide numa cópia do workbook: carregar um mês com Pendente, Alterado e Finalizado;
+   só o Pendente deve mudar de condições, mantendo Pendente. Edite-o, grave, reabra
+   e reponha: deve recuperar as entradas anteriores. Tente repor um Finalizado e um
+   Alterado sem referência: ambos devem ser recusados.
+4. Depois da validação, integre a interface. A versão antiga do script rejeita os novos
+   envelopes antes de escrever. A interface exige a confirmação v2 e não apresenta
+   sucesso com uma resposta antiga/incompleta.
+
+A nova tabela **tbl_lancamentos_iniciais_RH** é criada pelo script numa folha adicional,
+com `Chave`, `Referencia_JSON` e `Guardado_Em`. Não a apague: contém as referências para
+reposição. As permissões são as do workbook; não é exposta pela API de consulta.
+As cópias de recuperação do workbook devem incluir esta tabela.
+
+O recálculo mantém Pendente, actualiza apenas condições de pagamento e auditoria, e
+preserva faltas, horas, subsídios, bónus, descontos e observações. A reposição recupera
+as entradas e condições da referência, marca Pendente / Revisto Não e actualiza auditoria.
+Não escreve nas colunas de fórmulas. Os valores calculados reflectem as fórmulas actuais.
+Lançamentos já Alterados antes desta instalação não têm referência recuperável.
+
+O fluxo deve continuar a autorizar apenas Superadministrador/Administrador RH e a
+serializar escritas ao workbook (Concurrency control = 1). O script revalida o estado
+no Excel; uma linha que passou de Pendente para Alterado/Finalizado é ignorada no lote.
+A validação de todas as linhas precede as escritas; falhas de serviço durante a escrita
+não têm garantia transaccional e exigem reler o mês antes de repetir.
+
+## Referência anterior de criação de mês
 
 `LancamentoNovoMes.ts` grava as linhas de um novo mês em `tbl_lançamento` numa única chamada,
 em substituição do `Apply_to_each → Adicionar_Lancamento` (uma chamada por linha) do fluxo
-`RH_API_Actualizar`. **Ainda não está ligado a nenhum fluxo.**
+`RH_API_Actualizar`. A ligação efectiva deve ser confirmada no ambiente Microsoft.
 
 ## Parâmetros (acção "Run script from SharePoint library")
 

@@ -135,6 +135,19 @@ export async function gravarLancamento({ano, mes, mesNome, linha} = {}, deps = {
   return {alteradas: Number(body.alteradas) || 1, linha: linhaExcel};
 }
 
+// Operações v2 passam no ramo existente lancamento_editar, sem mudar os parâmetros do script.
+export async function operarLancamentos(operacao, {ano, mes, mesNome, atualizacoes, Empresa, Codigo, utilizador = ""}, deps = {}) {
+  if (!["recalcular_pendentes", "repor_inicial"].includes(operacao)) throw new ApiError("Operação inválida.", 0, "RH_ACTION");
+  const envelope = {__rh_operacao: operacao, Empresa, Codigo, atualizacoes,
+    "Utilizador Alteracao": utilizador, "Data Ultima Alteracao": Date.now() / 86400000 + 25569};
+  const body = await callApi('lancamento_editar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas: [envelope]}});
+  let r = body.linha;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch { r = null; } }
+  if (r?.versao !== 2 || r.operacao !== operacao || !Array.isArray(r.linhas))
+    throw new ApiError("Resposta sem confirmação do recálculo/reposição. Actualize o Office Script LancamentoNovoMes e confirme a resposta do fluxo.", 0, "RH_SCRIPT_VERSION");
+  return r;
+}
+
 // Finalizar mês (modo "finalizar"): todos os lançamentos do mês passam a Finalizado / Revisto = Sim.
 export async function finalizarMes({ano, mes, mesNome, utilizador = '', agoraSerie = ''} = {}, deps = {}) {
   if (!mesNome) throw new ApiError('Mês inválido.', 0, 'RH_ACTION');

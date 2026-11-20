@@ -334,6 +334,18 @@ export function iniciarLancamentos(ctx) {
       fechar();
       ctx.gravarEmFundo({ano, mes, chave, pedido: {ano, mes, mesNome: M.NOME_MES[mes - 1], linha: r.linha}});
     })});
+    if (!fechado && pode) lista.splice(2, 0, {texto: "Voltar ao estado inicial", click: exclusivo(async () => {
+      const entradasAntes = Object.fromEntries(F.CAMPOS_EDITAVEIS.map(c => [c.k, $("le-" + c.k)?.value ?? ""]));
+      const reposicao = abrir({eyebrow: "REPOR LANÇAMENTO", titulo: "Voltar ao estado inicial", sub: v("Nome") + " · " + M.NOME_MES[mes - 1] + " " + ano});
+      $("rel-body").replaceChildren(el("p", {text: "Esta operação substitui as entradas e condições de pagamento deste colaborador pelos valores iniciais guardados antes das alterações e repõe o estado Pendente. Inclui alterações já gravadas. As fórmulas serão recalculadas. Lançamentos Finalizados não podem ser repostos."}),
+        el("p", {class: "help", text: "Se não existir uma referência inicial guardada, a reposição será recusada. Edições ainda não gravadas neste formulário serão descartadas."}), campoUrl());
+      accoes([{texto: "Confirmar reposição", classe: "primary", ocupado: "A repor…", click: async () => {
+        guardarUrlSePreciso();
+        await ctx.reporInicial({ano, mes, Empresa: v("Empresa"), Codigo: M.normalizarCodigo(v("Codigo"))});
+        if (reposicao !== tarefa) return;
+        fechar(); ctx.aviso("Valores iniciais repostos. O lançamento voltou a Pendente.");
+      }}, {texto: "Cancelar", click: () => { editar(original); for (const [k, valor] of Object.entries(entradasAntes)) if ($("le-" + k)) $("le-" + k).value = valor; }}]);
+    })});
     accoes(lista);
   }
 
