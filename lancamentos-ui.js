@@ -1,3 +1,4 @@
+import {criarProgresso} from "./rh-progresso.js";
 // Lançamento salarial: pré-visualização da folha, exportação PDF/Excel, relatório comparativo e Novo mês.
 import * as M from "./rh-modulos.js";
 import * as F from "./rh-folha.js";
@@ -25,6 +26,7 @@ const cartao = (rotulo, valor, sub = "") => el("article", {class: "metric mini"}
 
 export function iniciarLancamentos(ctx) {
   const dlg = $("relatorio");
+  let criandoMes = false;
   let tarefa = 0; // invalida pedidos antigos quando o diálogo é reaberto
 
   function abrir({eyebrow, titulo, sub = ""}) {
@@ -34,15 +36,15 @@ export function iniciarLancamentos(ctx) {
     if (!dlg.open) { if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", ""); }
     return ++tarefa;
   }
-  const fechar = () => { tarefa++; if (typeof dlg.close === "function") dlg.close(); else dlg.removeAttribute("open"); };
+  const fechar = () => { if (criandoMes) return; tarefa++; if (typeof dlg.close === "function") dlg.close(); else dlg.removeAttribute("open"); };
   $("rel-fechar").addEventListener("click", fechar);
-  dlg.addEventListener("cancel", () => { tarefa++; });
+  dlg.addEventListener("cancel", e => { if (criandoMes) { e.preventDefault(); return; } tarefa++; });
   function accoes(lista) {
     $("rel-accoes").replaceChildren(el("span"), ...lista.map(a => {
       const b = el("button", {type: "button", class: a.classe || "outline", text: a.texto, disabled: Boolean(a.desactivado)});
       if (a.titulo) b.title = a.titulo;
       b.addEventListener("click", async () => {
-        if (!a.click) return;
+        if (!a.click || b.disabled) return;
         const t = b.textContent, ocupado = a.ocupado || "A gerar…", t0 = Date.now();
         b.disabled = true; b.textContent = ocupado; $("rel-erro").textContent = "";
         const relogio = setInterval(() => { if (b.isConnected && b.disabled) b.textContent = ocupado + " " + Math.round((Date.now() - t0) / 1000) + " s"; }, 1000);
@@ -147,7 +149,9 @@ export function iniciarLancamentos(ctx) {
     const selAno = el("select", {id: "nm-ano"}, ...[sug.ano - 1, sug.ano, sug.ano + 1].map(a => el("option", {value: String(a), text: String(a)})));
     selMes.value = String(sug.mes); selAno.value = String(sug.ano);
     const resultado = el("div", {id: "nm-resultado"});
+    const progressoHost = el("div", {id: "nm-progresso"});
     $("rel-body").replaceChildren(
+      progressoHost,
       el("div", {class: "nm-escolha"}, el("label", {}, "Mês", selMes), el("label", {}, "Ano", selAno),
         el("p", {class: "help", text: "Período de folha 21–20. Entram os colaboradores com contrato vigente no período; as entradas do mês anterior (faltas, horas extra, subsídios, bónus, adiantamentos, empréstimos, outros descontos, dependentes, canalizar e observações) são copiadas; o valor unitário vem do contrato/adenda (Mensal) ou das Settings (Hora/Diário)."})),
       el("ul", {class: "criterios"},
@@ -157,10 +161,17 @@ export function iniciarLancamentos(ctx) {
     const verificar = async () => {
       const ano = Number(selAno.value), mes = Number(selMes.value), ant = mes === 1 ? {ano: ano - 1, mes: 12} : {ano, mes: mes - 1};
       resultado.replaceChildren(el("p", {class: "loading-line", text: "A ler colaboradores, adendas, Settings e os lançamentos de " + M.NOME_MES[mes - 1] + " e " + M.NOME_MES[ant.mes - 1] + "… (pode demorar 1 a 2 minutos)"}));
-      const [funcionarios, contratos, mesAlvo, mesAnt] = await Promise.all([ctx.funcionarios(), ctx.contratos(), ctx.carregarMes(ano, mes), ctx.carregarMes(ant.ano, ant.mes)]);
+      const progresso = criarProgresso(progressoHost, "Verificar mês", 5);
+      selAno.disabled = selMes.disabled = true;
+      let feitas = 0;
+      try {
+      const [funcionarios, contratos, mesAlvo, mesAnt] = await Promise.all([ctx.funcionarios(), ctx.contratos(), ctx.carregarMes(ano, mes), ctx.carregarMes(ant.ano, ant.mes)].map(p => p.then(v => { progresso.actualizar(++feitas, "A verificar os dados do mês…"); return v; })));
       if (t !== tarefa) return;
       const r = F.prepararNovoMes({ano, mes, funcionarios, adendas: contratos.adendas, parametros: contratos.parametros, lancamentosMes: mesAlvo, lancamentosAnterior: mesAnt, utilizador: ctx.utilizador()});
+      progresso.concluir(r.erros.length ? "Verificação concluída com bloqueios; corrija antes de criar." : "Verificação concluída. Pronto para criar o mês.");
       mostrarVerificacao(r, ano, mes, t, () => { ctx.esquecerMes(ano, mes); ctx.esquecerMes(ant.ano, ant.mes); return verificar(); });
+      } catch (e) { progresso.falhar(e.message); throw e; }
+      finally { selAno.disabled = selMes.disabled = false; }
     };
     accoes([{texto: "Verificar critérios", classe: "primary", ocupado: "A verificar…", click: verificar}, {texto: "Fechar", click: fechar}]);
   }
@@ -190,7 +201,7 @@ export function iniciarLancamentos(ctx) {
       {texto: "Verificar de novo", ocupado: "A verificar…", click: reverificar},
       {texto: "Criar " + nome + " (" + r.linhas.length + ")", classe: "primary", ocupado: "A enviar…", desactivado: r.erros.length > 0 || !r.linhas.length || !pode,
         titulo: !pode ? "Só Superadministrador ou Administrador RH" : r.erros.length ? "Corrija os bloqueios primeiro" : "",
-        click: () => criar(r, ano, mes, t)},
+        click: () => ctx.operarMes(() => criar(r, ano, mes, t))},
       {texto: "Fechar", click: fechar}]);
     if (!pode) $("rel-erro").textContent = "O seu perfil só permite consultar. Criar o mês exige Superadministrador ou Administrador RH.";
   }
@@ -198,45 +209,51 @@ export function iniciarLancamentos(ctx) {
     const campoUrl = $("nm-url");
     if (campoUrl && !campoUrl.closest("label").hidden && campoUrl.value.trim()) ctx.guardarUrlGravacao(campoUrl.value);
     if (!ctx.urlGravacao()) throw Error("Falta o endereço do fluxo RH_API_Actualizar (peça-o ao administrador).");
-    // Confirmação final: verifica outra vez que o mês continua vazio.
-    ctx.esquecerMes(ano, mes);
-    const agora = await ctx.carregarMes(ano, mes);
-    if (agora.length) throw Error("Entretanto já foram criados lançamentos para " + M.NOME_MES[mes - 1] + "/" + ano + ".");
-    const t0 = Date.now();
-    const res = await ctx.gravarMes({ano, mes, mesNome: r.mesNome, linhas: r.linhas});
-    if (t !== tarefa) return;
-    acompanhar(res.total, ano, mes, t, t0);
+    const progresso = criarProgresso($("nm-progresso"), "Criar mês", 3);
+    const controles = [...$("rel-accoes").querySelectorAll("button"), $("nm-ano"), $("nm-mes"), $("rel-fechar")].filter(Boolean);
+    const anteriores = controles.map(b => b.disabled);
+    criandoMes = true;
+    controles.forEach(b => b.disabled = true);
+    $("rel-body").scrollTop = 0;
+    try {
+      // Verifica outra vez que o mês continua vazio antes de enviar.
+      ctx.esquecerMes(ano, mes);
+      const agora = await ctx.carregarMes(ano, mes);
+      if (t !== tarefa) return;
+      if (agora.length) throw Error("Entretanto já foram criados lançamentos para " + M.NOME_MES[mes - 1] + "/" + ano + ".");
+      progresso.actualizar(1, "Mês disponível. A aguardar a gravação no Excel…");
+      const res = await ctx.gravarMes({ano, mes, mesNome: r.mesNome, linhas: r.linhas});
+      progresso.actualizar(2, "Pedido aceite. A confirmar os lançamentos gravados…");
+      if (t !== tarefa) return;
+      await acompanhar(res.total, ano, mes, t, progresso);
+    } catch (e) { progresso.falhar(e.message); throw e; }
+    finally { criandoMes = false; controles.forEach((b, i) => b.disabled = anteriores[i]); }
   }
 
-  async function acompanhar(total, ano, mes, t, t0 = Date.now()) {
-    const seg = () => " · " + Math.round((Date.now() - t0) / 1000) + " s";
-    const barra = el("progress", {max: total, value: 0}), estado = el("p", {class: "loading-line", text: "Pedido aceite. O Power Automate está a gravar " + total + " linhas na tbl_lançamento…"});
-    $("rel-body").replaceChildren(el("div", {class: "nm-progresso"}, el("h3", {text: "A criar " + M.NOME_MES[mes - 1] + " " + ano}), barra, estado,
-      el("p", {class: "help", text: "Pode fechar esta janela: a gravação continua no Power Automate (o mês é gravado num só bloco pelo Office Script)."})));
-    accoes([{texto: "Fechar", click: fechar}]);
+  async function acompanhar(total, ano, mes, t, progresso) {
     const inicio = Date.now();
-    let primeira = true; // o fluxo só responde quando o script termina: a primeira verificação é imediata
+    let primeira = true;
     while (Date.now() - inicio < 20 * 60000) {
       if (!primeira) await new Promise(ok => setTimeout(ok, 30000));
       primeira = false;
       if (t !== tarefa) { ctx.esquecerMes(ano, mes); return; }
       ctx.esquecerMes(ano, mes);
       let linhas;
-      try { linhas = (await ctx.carregarMes(ano, mes)).filter(l => F.linhasFolha([l], ano, mes).length); } catch { continue; }
+      try { linhas = (await ctx.carregarMes(ano, mes)).filter(l => F.linhasFolha([l], ano, mes).length); }
+      catch { progresso.actualizar(2, "Não foi possível confirmar os dados; a tentar novamente…"); continue; }
       if (t !== tarefa) return;
-      barra.value = Math.min(linhas.length, total);
-      estado.textContent = linhas.length + " de " + total + " linhas gravadas…" + seg();
+      progresso.actualizar(2, linhas.length + " de " + total + " linhas confirmadas. A aguardar conclusão…");
       if (linhas.length >= total) {
         const semFormula = linhas.filter(l => M.campo(l, "Salario Liquido") === "" || M.campo(l, "Vencimento") === "").length;
-        estado.textContent = semFormula
-          ? "Gravadas " + linhas.length + " linhas, mas " + semFormula + " ainda sem Vencimento/Salário líquido calculado. Abra o Excel e confirme que as colunas de fórmulas se estenderam às novas linhas."
-          : "Concluído: " + linhas.length + " lançamentos criados com estado Pendente" + seg() + ".";
-        estado.className = semFormula ? "form-error" : "ok-line";
+        if (semFormula) {
+          progresso.falhar("Gravadas " + linhas.length + " linhas, mas " + semFormula + " sem Vencimento/Salário líquido calculado. Confirme as fórmulas no Excel.");
+        } else progresso.concluir(linhas.length + " lançamentos criados com estado Pendente.");
+        accoes([{texto: "Fechar", click: fechar}]);
         ctx.mostrarMes(ano, mes);
         return;
       }
     }
-    estado.textContent = "A gravação está a demorar mais do que o previsto. Consulte o histórico de execuções do RH_API_Actualizar.";
+    throw Error("A confirmação está a demorar mais do que o previsto. Consulte o histórico do RH_API_Actualizar antes de repetir a criação.");
   }
 
 

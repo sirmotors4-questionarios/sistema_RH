@@ -379,3 +379,12 @@ dialog#ac-dlg::backdrop,dialog#ac-feito::backdrop{background:#0f1b2a80}
 .fc-lista .help{margin:6px}
 .fc-accoes{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}
 #pay-filtros-limpar{margin-left:10px;color:#be2537;font-size:12px}
+
+/* Estado do processamento antes dos dados, com progresso acessível. */
+.pay-processamento{padding:0 20px}
+.rh-progresso{padding:16px;margin:12px 0;border:1px solid #ddd8db;border-radius:10px;background:#faf8f9}
+.rh-progresso p{margin:0 0 10px;font-weight:600}
+.rh-progresso progress{display:block;width:100%;height:16px;accent-color:var(--red)}
+.rh-progresso small{display:block;margin-top:8px;color:#655b60}
+.rh-progresso-erro{border-color:#b42318}
+button:disabled{cursor:not-allowed;opacity:.55}
