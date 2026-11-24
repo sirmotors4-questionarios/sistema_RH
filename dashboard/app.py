@@ -45,6 +45,12 @@ st.markdown(
 )
 
 
+
+def confirmar_apresentacao():
+    import html
+    versao_pronta = (DADOS / "versao.txt").read_text() if (DADOS / "versao.txt").exists() else "0"
+    st.markdown(f'<span data-rh-pronto="{html.escape(versao_pronta, quote=True)}"></span>', unsafe_allow_html=True)
+
 # ---------------------------------------------------------------- utilitários de dados
 def _sem_acentos(s):
     return "".join(c for c in unicodedata.normalize("NFD", str(s)) if unicodedata.category(c) != "Mn").strip().lower()
@@ -268,6 +274,7 @@ meta, func, lanc = carregar(versao_f.read_text() if versao_f.exists() else "0")
 if func.empty and lanc.empty:
     st.title("Dashboard RH")
     st.info("Sem dados. Abra o dashboard a partir do Sistema RH depois de iniciar sessão.")
+    confirmar_apresentacao()
     st.stop()
 
 
@@ -460,6 +467,7 @@ if escolha == "Custo do Capital Humano":
                + ("" if TEM_IND else " (Indemnizações ainda não lidas: abra a página Indemnizações do Sistema RH e actualize o dashboard.)"))
     if L.empty:
         sem_dados()
+        confirmar_apresentacao()
         st.stop()
     pessoas = L["chave"].nunique()
     custo = L["Custo empresa"].sum()  # custo salarial
@@ -583,6 +591,7 @@ elif escolha == "Perfil dos Colaboradores":
                "Use o filtro «Estado» para ver só activos ou inactivos.")
     if F.empty:
         sem_dados()
+        confirmar_apresentacao()
         st.stop()
     n = len(F)
     act = int(F["activo"].sum())
@@ -786,6 +795,7 @@ elif escolha == "Remuneração e Equidade":
     st.caption(f"Vencimento por colaborador e por mês ({rotulo_periodo}). Médias calculadas por pessoa.")
     if L.empty:
         sem_dados()
+        confirmar_apresentacao()
         st.stop()
     pp = L.groupby(["chave", "Sexo", "Empresa", "Departamento", "Profissao", "TipoContrato"], as_index=False).agg(
         Vencimento=("Vencimento", "mean"), Liquido=("Salario Liquido", "mean"), IRPS=("IRPS", "mean"), Custo=("Custo empresa", "mean"))
@@ -843,9 +853,11 @@ if escolha == "Indemnizações":
     if not TEM_IND:
         st.info("As indemnizações não foram lidas: abra uma vez a página Indemnizações do Sistema RH (e cole o endereço do fluxo) "
                 "e depois carregue em «Actualizar dados» no Dashboard.")
+        confirmar_apresentacao()
         st.stop()
     if ind.empty:
         sem_dados("Ainda não há indemnizações registadas.")
+        confirmar_apresentacao()
         st.stop()
 
     def filtra_ind(df):
@@ -942,3 +954,5 @@ if escolha == "Indemnizações":
             "Colaborador": atraso["Nome"], "Empresa": atraso["Empresa"], "Data limite": atraso["limite"].dt.strftime("%d/%m/%Y"),
             "Dias de atraso": (hoje - atraso["limite"]).dt.days, "Valor": atraso["Valor"].map(mt),
         }).sort_values("Dias de atraso", ascending=False), hide_index=True, width="stretch")
+
+confirmar_apresentacao()

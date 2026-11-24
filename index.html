@@ -7,8 +7,17 @@
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="modulos.css">
 </head>
-<body>
-<div class="app">
+<body class="a-iniciar">
+<section id="arranque" class="arranque" aria-labelledby="arranque-titulo">
+ <div class="arranque-cartao"><div class="eyebrow">SIR GRUPO · RECURSOS HUMANOS</div>
+ <h1 id="arranque-titulo" tabindex="-1">A preparar o seu espaço</h1>
+ <p>Os lançamentos, indemnizações e dashboards serão apresentados quando estiverem prontos.</p>
+ <div id="arranque-progresso" role="status">A verificar a sessão…</div>
+ <form id="arranque-config" hidden><label>Endereço de gestão das indemnizações<input id="arranque-url" type="url" required autocomplete="off" placeholder="https://…"></label><button class="primary" type="submit">Guardar e tentar novamente</button></form>
+ <div id="arranque-accoes" hidden><button id="arranque-repetir" class="primary" type="button">Tentar novamente</button><button id="arranque-sair" class="outline" type="button">Voltar ao início de sessão</button></div>
+ </div>
+</section>
+<div class="app" inert>
 <aside class="sidebar" id="sidebar">
   <div class="brand"><div class="brand-mark">S</div><div><b>SIR GRUPO</b><small>Gestão de Recursos Humanos</small></div></div>
   <div class="nav-caption">ESPAÇO DE TRABALHO</div>

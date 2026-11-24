@@ -24,20 +24,22 @@
 const estado = document.getElementById("estado"), texto = document.getElementById("estado-texto");
 const mostrar = (msg, erro = false) => { estado.hidden = false; estado.classList.toggle("erro", erro); texto.textContent = msg; };
 let app = null, codigo = null, versao = 0;
+let versaoDados = "", vigia = null;
 
 function ficheirosDados(dados) {
   versao += 1;
+  versaoDados = String(versao) + "-" + Date.now();
   return {
     "dados/funcionarios.json": JSON.stringify(dados.funcionarios || []),
     "dados/lancamentos.json": JSON.stringify(dados.lancamentos || []),
     "dados/meta.json": JSON.stringify(dados.meta || {}),
     "dados/indemnizacoes.json": JSON.stringify(dados.indemnizacoes || []),
     "dados/prestacoes.json": JSON.stringify(dados.prestacoes || []),
-    "dados/versao.txt": String(versao) + "-" + Date.now()
+    "dados/versao.txt": versaoDados
   };
 }
 
-async function receber(dados) {
+async function receber(dados, pedido) {
   try {
     if (!codigo) codigo = await (await fetch("dashboard/app.py", {cache: "no-cache"})).text();
     const ficheiros = ficheirosDados(dados);
@@ -59,58 +61,41 @@ async function receber(dados) {
         }
       }, document.getElementById("root"));
       estado.hidden = true;
-      vigiar();
+
     } else {
       for (const [caminho, conteudo] of Object.entries(ficheiros)) await app.writeFile(caminho, conteudo);
       // Reescrever o app.py faz o Streamlit correr de novo com os dados novos (server.runOnSave).
       await app.writeFile("app.py", codigo + "\n# dados " + versao + "\n");
     }
-    parent.postMessage({tipo: "rh-dashboard-pronto", versao}, location.origin);
+    vigiar(pedido, versaoDados);
   } catch (e) {
     mostrar("Não foi possível abrir o dashboard: " + (e && e.message ? e.message : e), true);
-    parent.postMessage({tipo: "rh-dashboard-erro", erro: String(e && e.message || e)}, location.origin);
+    parent.postMessage({tipo: "rh-dashboard-erro", pedido, erro: String(e && e.message || e)}, location.origin);
   }
 }
 
-// Vigilante: se o Streamlit não aparecer em 90 s, testa os servidores necessários e explica o que falhou,
-// em vez de deixar as mensagens do stlite a rodar sem fim.
-const LIMITE_S = 90;
-function abriu() { return Boolean(document.querySelector('[data-testid="stSidebar"], [data-testid="stMain"], [data-testid="stAppViewContainer"] h1')); }
-async function testar(url) {
-  const c = new AbortController(); const t = setTimeout(() => c.abort(), 15000);
-  try { await fetch(url, {mode: "no-cors", cache: "no-store", signal: c.signal}); return true; } catch { return false; } finally { clearTimeout(t); }
-}
-function vigiar() {
-  const t0 = Date.now();
-  const timer = setInterval(async () => {
-    if (abriu()) { clearInterval(timer); return; }
-    if (Date.now() - t0 < LIMITE_S * 1000) return;
-    clearInterval(timer);
-    const [cdn, site] = await Promise.all([
-      testar("https://cdn.jsdelivr.net/npm/@stlite/browser@1.10.0/package.json"),
-      testar(new URL("dashboard/app.py", location.href).href)]);
-    if (abriu()) return;
-    const causa = !cdn
-      ? "O navegador não consegue chegar a cdn.jsdelivr.net (onde está o Python). Peça à informática para permitir esse endereço ou experimente outro navegador."
-      : !site ? "Perdeu-se a ligação ao site do Sistema RH." 
-      : "Os servidores respondem, mas a preparação do Python não terminou (ligação lenta ou memória insuficiente). Feche outros separadores e tente de novo.";
-    document.getElementById("root").hidden = true;
-    estado.hidden = false; estado.classList.add("erro");
-    estado.querySelector(".barra")?.remove();
-    texto.textContent = `O dashboard não abriu em ${LIMITE_S} s. ${causa}`;
-    if (!document.getElementById("tentar")) {
-      const b = document.createElement("button");
-      b.id = "tentar"; b.textContent = "Tentar de novo";
-      b.style.cssText = "margin-top:6px;background:#be2537;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer";
-      b.onclick = () => parent.postMessage({tipo: "rh-dashboard-reiniciar"}, location.origin);
-      estado.append(b);
+// Só confirma depois de o Streamlit apresentar a versão enviada, incluindo estados sem dados.
+function vigiar(pedido, versaoEsperada) {
+  clearInterval(vigia);
+  const inicio = Date.now();
+  vigia = setInterval(() => {
+    const pronto = [...document.querySelectorAll('[data-rh-pronto]')].some(el => el.dataset.rhPronto === versaoEsperada);
+    const erro = document.querySelector('[data-testid="stException"]');
+    if (pronto && !erro) {
+      clearInterval(vigia); estado.hidden = true;
+      parent.postMessage({tipo: "rh-dashboard-pronto", pedido, versao}, location.origin);
+    } else if (erro || Date.now() - inicio > 150000) {
+      clearInterval(vigia);
+      const mensagem = erro ? "O Dashboard RH encontrou um erro ao apresentar os dados." : "O Dashboard RH não terminou de carregar. Verifique a ligação e tente novamente.";
+      mostrar(mensagem, true);
+      parent.postMessage({tipo: "rh-dashboard-erro", pedido, erro: mensagem}, location.origin);
     }
-  }, 2000);
+  }, 500);
 }
 
 window.addEventListener("message", ev => {
   if (ev.origin !== location.origin || ev.source !== parent) return; // só a página do sistema
-  if (ev.data && ev.data.tipo === "rh-dashboard-dados") receber(ev.data.dados || {});
+  if (ev.data && ev.data.tipo === "rh-dashboard-dados") receber(ev.data.dados || {}, ev.data.pedido);
 });
 parent.postMessage({tipo: "rh-dashboard-ola"}, location.origin);
 </script>

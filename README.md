@@ -175,3 +175,16 @@ A alteração no GitHub não actualiza automaticamente o script guardado na Micr
 Verificação local: Node.js 22.13+ (ou 24) e `node --test tests/*.test.mjs`.
 O teste do Office Script usa a implementação real com tabelas simuladas; não substitui o
 ensaio numa cópia do workbook e a verificação do fluxo autenticado.
+
+### Entrada com preparação completa
+
+O login por código (incluindo sessão guardada) e a sessão Microsoft passam por um
+ecrã de preparação antes de apresentar o portal. São validados o acesso, o cadastro,
+contratos/adendas, o mês salarial, os indicadores da página principal, as indemnizações
+e o histórico de 12 meses do Dashboard RH. A percentagem corresponde a etapas confirmadas;
+os 100% dependem também da confirmação de apresentação do Streamlit.
+
+Falhas mantêm o ecrã aberto com a etapa e permitem tentar novamente ou voltar ao login.
+Sem o endereço de gestão, o ecrã permite configurar as indemnizações. As indemnizações
+exigem a sessão por código já usada por esse módulo. A preparação apenas consulta dados;
+não recalcula nem grava salários. As páginas usam os dados preparados ao abrir.

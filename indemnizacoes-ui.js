@@ -28,14 +28,14 @@ export function iniciarIndemnizacoes(ctx) {
 
   // ---------- carregar ----------
   function deps() { return ctx.transporte(); }
-  async function carregar(forcar = false) {
+  async function carregar(forcar = false, estrito = false) {
     if (!ctx.ligado()) { mostrarVazio(); return; }
     if (!ctx.temUrl()) { mostrarVazio(true); return; }
     if (dados && !forcar) { render(); return; }
     if (aCarregar) return aCarregar;
     $("ind-badge").textContent = "A carregar…";
     const t0 = Date.now();
-    aCarregar = indemnizacoesListar(deps()).then(r => {
+    aCarregar = (ctx.ler ? ctx.ler(forcar) : indemnizacoesListar(deps())).then(r => {
       dados = {lista: I.indemnizacoes(r.indemnizacoes), prest: I.prestacoes(r.prestacoes), lido: new Date()};
       $("ind-badge").textContent = "Lido em " + Math.round((Date.now() - t0) / 1000) + " s · " + dados.lista.length + " plano(s)";
       render();
@@ -43,6 +43,7 @@ export function iniciarIndemnizacoes(ctx) {
       ctx.aviso("Indemnizações: " + e.message);
       $("ind-badge").textContent = "Erro: " + e.message;
       if (!dados) mostrarVazio(false, "Não foi possível ler as indemnizações: " + e.message);
+      if (estrito) throw e;
     }).finally(() => { aCarregar = null; });
     return aCarregar;
   }
@@ -378,6 +379,7 @@ export function iniciarIndemnizacoes(ctx) {
   });
 
   return {
+    preparar: () => carregar(false, true),
     abrir: () => { const h = hojeIso(); if (!dados) vista = {ano: Number(h.slice(0, 4)), mes: Number(h.slice(5, 7))}; carregar(); },
     limpar: () => { dados = null; fechar(); mostrarVazio(); },
     dados: () => dados
