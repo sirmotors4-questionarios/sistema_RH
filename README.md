@@ -178,13 +178,17 @@ ensaio numa cópia do workbook e a verificação do fluxo autenticado.
 
 ### Entrada com preparação completa
 
-O login por código (incluindo sessão guardada) e a sessão Microsoft passam por um
-ecrã de preparação antes de apresentar o portal. São validados o acesso, o cadastro,
-contratos/adendas, o mês salarial, os indicadores da página principal, as indemnizações
-e o histórico de 12 meses do Dashboard RH. A percentagem corresponde a etapas confirmadas;
-os 100% dependem também da confirmação de apresentação do Streamlit.
+O login por código (incluindo sessão guardada) e a sessão Microsoft passam por uma página de
+carregamento, separada do portal, que lista cada parte e o seu estado (em espera, a carregar,
+carregado, erro ou não carregado), com o resumo do que foi lido e o tempo:
 
-Falhas mantêm o ecrã aberto com a etapa e permitem tentar novamente ou voltar ao login.
-Sem o endereço de gestão, o ecrã permite configurar as indemnizações. As indemnizações
-exigem a sessão por código já usada por esse módulo. A preparação apenas consulta dados;
-não recalcula nem grava salários. As páginas usam os dados preparados ao abrir.
+1. Sessão e permissões — obrigatória; se falhar, o portal não abre.
+2. Colaboradores, Contratos e adendas, Férias e feriados e Lançamento salarial — em paralelo.
+3. Indemnizações e prestações — só para Superadministrador e Administrador RH com entrada por
+   código e endereço de gestão configurado. Nos restantes perfis aparece «Não se aplica ao seu perfil».
+4. Dashboard RH — histórico de 12 meses, com o número de meses lidos. Se as indemnizações não
+   estiverem disponíveis, o dashboard abre sem elas.
+
+Sem erros, o portal abre sozinho. Se alguma parte falhar, a página mostra o erro nessa linha e
+permite **Tentar novamente** (só as partes com erro voltam a ser pedidas), **Entrar mesmo assim**
+ou voltar ao início de sessão. A preparação apenas consulta dados; não recalcula nem grava salários.

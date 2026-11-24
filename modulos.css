@@ -400,3 +400,22 @@ button:disabled{cursor:not-allowed;opacity:.55}
 #arranque-config input{width:100%;padding:12px}
 body.a-iniciar{overflow:hidden}
 body.a-iniciar>.app{visibility:hidden;pointer-events:none}
+.arranque-lista{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:6px}
+.arranque-lista .etapa{display:grid;grid-template-columns:28px 1fr auto;align-items:start;gap:2px 12px;padding:8px 12px;border:1px solid #e3e7ee;border-radius:10px;background:#fbfcfd}
+.arranque-lista .etapa-ico{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:700;background:#eef1f5;color:#8a94a3}
+.arranque-lista .etapa-texto{display:grid;gap:1px;min-width:0;font-size:14px}
+.arranque-lista .etapa-texto small{color:#657080;font-size:12px}
+.arranque-lista .etapa-detalhe{font-size:13px;color:#3d4756;overflow-wrap:anywhere}
+.arranque-lista .etapa-detalhe:empty{display:none}
+.arranque-lista .etapa-estado{font-size:12px;font-weight:600;color:#8a94a3;white-space:nowrap}
+.arranque-lista .etapa-carregar{border-color:#b9cdf0;background:#f4f8ff}
+.arranque-lista .etapa-carregar .etapa-ico{background:#dce8fc;color:#2a5db0;animation:etapa-pulso 1.2s ease-in-out infinite}
+.arranque-lista .etapa-carregar .etapa-estado{color:#2a5db0}
+.arranque-lista .etapa-ok .etapa-ico{background:#dff3e6;color:#1d7a43}
+.arranque-lista .etapa-ok .etapa-estado{color:#1d7a43}
+.arranque-lista .etapa-erro{border-color:#f0c2c2;background:#fff6f6}
+.arranque-lista .etapa-erro .etapa-ico{background:#fbe0e0;color:#b3261e}
+.arranque-lista .etapa-erro .etapa-estado,.arranque-lista .etapa-erro .etapa-detalhe{color:#b3261e}
+.arranque-lista .etapa-ignorado{opacity:.75}
+@keyframes etapa-pulso{50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.arranque-lista .etapa-carregar .etapa-ico{animation:none}}

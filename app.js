@@ -544,52 +544,108 @@ function mostrarUtilizador(u){
 function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAcesso());
  $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);$("trocar-codigo").hidden=!(codigo&&PODE_TROCAR_CODIGO(utilizadorActual));
  document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
-let arranqueActivo = null, arranqueGeracao = 0, entradaActual = null;
+let arranqueActivo = null, arranqueGeracao = 0, entradaActual = null, arranqueEstados = new Map();
 function fecharArranque(){
  $("arranque").hidden=true;document.body.classList.remove("a-iniciar");document.querySelector(".app").inert=false;
 }
+// Página de carregamento: separada do portal, descreve cada parte que está a ser carregada e o seu estado.
+const ETAPAS_ARRANQUE=[
+ {id:"sessao",titulo:"Sessão e permissões",desc:"Confirma o seu acesso e o seu perfil de utilizador."},
+ {id:"funcionarios",titulo:"Colaboradores",desc:"Cadastro de colaboradores, usado em todas as páginas."},
+ {id:"contratos",titulo:"Contratos e adendas",desc:"Condições contratuais e adendas registadas."},
+ {id:"ferias",titulo:"Férias e feriados",desc:"Registos de férias e calendário de feriados."},
+ {id:"lancamentos",titulo:"Lançamento salarial",desc:"Mês de processamento mais recente."},
+ {id:"indemnizacoes",titulo:"Indemnizações e prestações",desc:"Planos de indemnização e prestações a pagar."},
+ {id:"painel",titulo:"Dashboard RH",desc:"Histórico dos últimos 12 meses para os gráficos."}];
+const ICONE_ETAPA={espera:"○",carregar:"◌",ok:"✓",erro:"✕",ignorado:"–"};
+const TEXTO_ETAPA={espera:"Em espera",carregar:"A carregar…",ok:"Carregado",erro:"Erro",ignorado:"Não carregado"};
+function desenharEtapa(id,estado,detalhe=""){
+ const li=$("arranque-etapa-"+id);if(!li)return;
+ li.className="etapa etapa-"+estado;
+ li.querySelector(".etapa-ico").textContent=ICONE_ETAPA[estado];
+ li.querySelector(".etapa-estado").textContent=TEXTO_ETAPA[estado];
+ li.querySelector(".etapa-detalhe").textContent=detalhe;
+}
+function desenharListaArranque(){
+ $("arranque-lista").replaceChildren(...ETAPAS_ARRANQUE.map(e=>{
+  const li=document.createElement("li");li.id="arranque-etapa-"+e.id;
+  li.innerHTML='<span class="etapa-ico" aria-hidden="true"></span><div class="etapa-texto"><b></b><small></small><span class="etapa-detalhe"></span></div><span class="etapa-estado"></span>';
+  li.querySelector("b").textContent=e.titulo;li.querySelector("small").textContent=e.desc;
+  return li;
+ }));
+ ETAPAS_ARRANQUE.forEach(e=>desenharEtapa(e.id,"espera"));
+}
+function podeIndemnizacoes(){return Boolean(sessaoAcesso()&&urlIndemnizacoes()&&utilizadorActual?.propor)}
 function ligar(quem,via){
  if(arranqueActivo)return arranqueActivo;
  entradaActual={quem,via};
  const geracao=++arranqueGeracao;
  $("arranque").hidden=false;document.body.classList.add("a-iniciar");document.querySelector(".app").inert=true;
- $("arranque-accoes").hidden=true;$("arranque-config").hidden=true;$("arranque-titulo").focus();
- const progresso=criarProgresso($("arranque-progresso"),"Preparar sistema",20);
- const verificar=()=>{if(geracao!==arranqueGeracao)throw Error("Sessão interrompida.");};
+ $("arranque-accoes").hidden=true;$("arranque-entrar").hidden=true;$("arranque-config").hidden=true;$("arranque-titulo").focus();
+ desenharListaArranque();
+ const estados=new Map(ETAPAS_ARRANQUE.map(e=>[e.id,"espera"]));arranqueEstados=estados;
+ const progresso=criarProgresso($("arranque-progresso"),"Preparar sistema",ETAPAS_ARRANQUE.length);
+ const activa=()=>geracao===arranqueGeracao;
+ const verificar=()=>{if(!activa())throw Error("Sessão interrompida.");};
+ let fracPainel=0;
+ const avancar=()=>{
+  if(!activa())return;
+  const feitas=[...estados.values()].filter(v=>v!=="espera"&&v!=="carregar").length+(estados.get("painel")==="carregar"?fracPainel:0);
+  const emCurso=ETAPAS_ARRANQUE.filter(e=>estados.get(e.id)==="carregar").map(e=>e.titulo);
+  progresso.actualizar(feitas,emCurso.length?"A carregar: "+emCurso.join(", ")+"…":"A concluir…");
+ };
+ const marcar=(id,estado,detalhe)=>{if(!activa())return;estados.set(id,estado);desenharEtapa(id,estado,detalhe);avancar();};
+ const segs=t0=>Math.round((Date.now()-t0)/1000)+" s";
+ const etapa=async(id,fn,resumo=()=>"")=>{
+  const t0=Date.now();marcar(id,"carregar","");
+  try{const r=await fn();verificar();let txt="";try{txt=resumo(r)||""}catch{}marcar(id,"ok",(txt?txt+" · ":"")+segs(t0));return r}
+  catch(e){marcar(id,"erro",e.message||String(e));throw e}
+ };
  arranqueActivo=(async()=>{
   try{
-   progresso.actualizar(0,"A validar a sessão e as permissões…");
-   const config=await loadConfiguracoes(transporte());verificar();
+   const config=await etapa("sessao",()=>loadConfiguracoes(transporte()),c=>c.utilizador?.perfil||"");
    if(config.utilizador?.trocarCodigo&&PODE_TROCAR_CODIGO(config.utilizador)&&sessaoAcesso()){
     entradaPendente={email:quem};fecharArranque();abrirTroca("obrigatoria");return;
    }
    ligado=true;fecharAcesso();botoes();if(config.utilizador)mostrarUtilizador(config.utilizador);
    $("status-pill").textContent="● Ligado";$("source-title").textContent="Sessão iniciada";$("source-sub").textContent=quem;
    estadoLigacao("live","Sessão iniciada: "+quem,"Entrada por "+via+".");
-   const etapas=[["funcionarios","A carregar os colaboradores…"],["contratos","A carregar contratos e adendas…"],["lancamentos","A carregar o mês de lançamento salarial…"],["ferias","A preparar os indicadores da página principal…"]];
-   let feitas=1;
-   for(const [modulo,descricao] of etapas){progresso.actualizar(feitas,descricao);await carregar(modulo);verificar();feitas++;}
-   progresso.actualizar(5,"A carregar indemnizações e prestações…");
-   if(!sessaoAcesso()||!urlIndemnizacoes()){
-    $("arranque-config").hidden=!sessaoAcesso();
-    throw Error(sessaoAcesso()?"Falta configurar o endereço de gestão das indemnizações neste navegador.":"Para carregar as indemnizações, entre com o seu código de acesso.");
-   }
-   await indemn.preparar();verificar();
-   progresso.actualizar(6,"A preparar o Dashboard RH e o histórico de 12 meses…");
-   await painel.abrir(false,{estrito:true,progresso:(n,total,descricao)=>{verificar();progresso.actualizar(6+n,descricao||"Dashboard RH: "+n+" de "+total+" meses lidos.");}});verificar();
-   progresso.actualizar(19,"A apresentar as páginas carregadas…");
+   // Cadastro, contratos, férias e o mês salarial são independentes: carregam em paralelo.
+   await Promise.allSettled([
+    etapa("funcionarios",()=>carregar("funcionarios"),()=>{const l=M.colaboradores(linhas("funcionarios","tbl_funcionarios"));return l.length+" colaboradores ("+l.filter(c=>M.activo(c.estado)).length+" activos)"}),
+    etapa("contratos",()=>carregar("contratos"),()=>M.adendas(linhas("contratos","tbl_adendas")).length+" adendas"),
+    etapa("ferias",()=>carregar("ferias"),()=>linhas("ferias","tbl_ferias").length+" registos de férias"),
+    etapa("lancamentos",()=>carregar("lancamentos"),()=>{const p=dados.lancamentos?.periodo;return p?M.NOME_MES[p.mes-1]+" "+p.ano+" · "+M.lancamentos(linhas("lancamentos","tbl_lançamento"),p.ano,p.mes).length+" lançamentos":""})]);
+   verificar();
+   // Indemnizações: só para os perfis que o fluxo aceita (Superadministrador e Administrador RH).
+   if(podeIndemnizacoes())await etapa("indemnizacoes",()=>indemn.preparar().then(()=>indemn.dados()),d=>d?d.lista.length+" plano(s) · "+d.prest.length+" prestação(ões)":"").catch(()=>{});
+   else if(!utilizadorActual?.propor)marcar("indemnizacoes","ignorado","Não se aplica ao seu perfil.");
+   else if(!sessaoAcesso())marcar("indemnizacoes","ignorado","Disponível só com entrada por código de acesso.");
+   else{marcar("indemnizacoes","ignorado","Endereço de gestão não configurado neste navegador.");$("arranque-config").hidden=false;}
+   verificar();
+   await etapa("painel",()=>painel.abrir(false,{estrito:true,progresso:(n,total)=>{if(!activa())return;fracPainel=Math.min(1,n/total);desenharEtapa("painel","carregar",n+" de "+total+" meses lidos");avancar();}}),()=>"12 meses lidos").catch(()=>{});
+   verificar();
    render();
-   progresso.concluir("Lançamentos, indemnizações, Dashboard RH e página principal prontos.");
-   await new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)));verificar();
-   fecharArranque();$("crumb").setAttribute("tabindex","-1");$("crumb").focus();
+   const falhas=ETAPAS_ARRANQUE.filter(e=>estados.get(e.id)==="erro");
+   if(!falhas.length){
+    progresso.concluir("Tudo carregado.");
+    await new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)));verificar();
+    entrarNoPortal();
+    return;
+   }
+   progresso.falhar(falhas.length+" parte(s) não foram carregadas: "+falhas.map(e=>e.titulo).join(", ")+". Pode tentar novamente ou entrar mesmo assim.");
+   $("arranque-entrar").hidden=false;$("arranque-accoes").hidden=false;$("arranque-accoes").scrollIntoView({block:"nearest"});
   }catch(e){
-   if(geracao!==arranqueGeracao)return;
-   progresso.falhar(e.message||String(e));$("arranque-accoes").hidden=false;
+   if(!activa())return;
+   progresso.falhar(e.message||String(e));$("arranque-accoes").hidden=false;$("arranque-accoes").scrollIntoView({block:"nearest"});
   }
  })().finally(()=>{if(geracao===arranqueGeracao)arranqueActivo=null;});
  return arranqueActivo;
 }
-$("arranque-repetir").addEventListener("click",()=>{painel.limpar();if(entradaActual)ligar(entradaActual.quem,entradaActual.via);});
+function entrarNoPortal(){fecharArranque();$("crumb").setAttribute("tabindex","-1");$("crumb").focus();}
+$("arranque-entrar").addEventListener("click",()=>{if(!ligado)return;entrarNoPortal();showToast("Algumas partes não foram carregadas; as respectivas páginas indicam o erro.");});
+// Tentar novamente: o que já foi carregado vem da memória; só as partes com erro voltam a ser pedidas.
+$("arranque-repetir").addEventListener("click",()=>{if(arranqueEstados.get("painel")==="erro")painel.limpar();if(entradaActual)ligar(entradaActual.quem,entradaActual.via);});
 $("arranque-config").addEventListener("submit",ev=>{ev.preventDefault();try{guardarUrlIndemnizacoes($("arranque-url").value);$("arranque-url").value="";$("arranque-repetir").click();}catch(e){showToast(e.message)}});
 $("arranque-sair").addEventListener("click",()=>{
  if(sessaoAcesso()){sairAcesso();desligar();abrirAcesso();}else signOut().catch(e=>showToast(e.message));
@@ -730,7 +786,8 @@ const painel=iniciarPainel({
  funcionarios:forcar=>carregar("funcionarios",forcar).then(()=>linhas("funcionarios","tbl_funcionarios")),
  carregarMes:(ano,mes,forcar)=>carregarMes(ano,mes,forcar),
  periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null),
- indemnizacoes:forcar=>lerIndemnizacoes(forcar)
+ // O Dashboard abre sem indemnizações se o perfil não as tiver ou se falharem (o erro fica indicado na própria área).
+ indemnizacoes:forcar=>podeIndemnizacoes()?lerIndemnizacoes(forcar).catch(()=>null):Promise.resolve(null)
 });
 // ---------- Relatórios formais (PDF e Word) ----------
 const relatorios=iniciarRelatorios({
