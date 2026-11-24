@@ -46,8 +46,11 @@ export async function callApi(action, {getToken, credenciais, params, fetchImpl 
   } catch {
     throw new ApiError('Não foi possível contactar o servidor. Verifique a ligação.', 0, 'RH_NETWORK');
   }
-  let body = null;
-  try { body = await response.json(); } catch { body = null; }
+  let body = null, texto = '';
+  if (typeof response.text === 'function') {
+    try { texto = await response.text(); } catch { texto = ''; }
+    try { body = texto ? JSON.parse(texto) : null; } catch { body = null; }
+  } else { try { body = await response.json(); } catch { body = null; } }
   if (response.status === 401) throw new ApiError('Sessão Microsoft inválida ou expirada. Inicie sessão novamente.', 401, 'RH_AUTH');
   if (response.status === 403) {
     if (credenciais && body?.erro) throw new ApiError(body.erro, 403, 'RH_FORBIDDEN');
@@ -55,12 +58,32 @@ export async function callApi(action, {getToken, credenciais, params, fetchImpl 
     const quem = body?.email ? ' (' + body.email + ')' : '';
     throw new ApiError('A sua conta' + quem + ' não está autorizada no Sistema RH. Peça acesso a um Superadministrador.', 403, 'RH_FORBIDDEN');
   }
-  if (response.status === 400) throw new ApiError(body?.erro || 'Pedido inválido.', 400, 'RH_ACTION');
-  if (!response.ok && body?.erro) throw new ApiError(body.erro, response.status, response.status === 409 ? 'RH_CONFLITO' : 'RH_NAO_ENCONTRADO');
+  const razao = motivoErro(body, texto);
+  if (response.status === 400) throw new ApiError(razao || 'Pedido inválido.', 400, 'RH_ACTION');
+  if (!response.ok && razao) throw new ApiError(razao + ' (' + response.status + ')', response.status, response.status === 409 ? 'RH_CONFLITO' : 'RH_NAO_ENCONTRADO');
   if (!response.ok || !body || body.ok !== true) {
-    throw new ApiError('O servidor devolveu uma resposta inválida (' + response.status + ').', response.status, 'RH_RESPONSE');
+    throw new ApiError(razao ? razao + ' (' + response.status + ')' : 'O servidor devolveu uma resposta inválida (' + response.status + ').', response.status, 'RH_RESPONSE');
   }
   return body;
+}
+
+// Motivo de uma resposta de erro, venha ele do fluxo ({erro}), do Office Script ({erros}, também dentro de
+// "resultado" ou em texto JSON) ou do próprio Power Automate ({error:{code,message}}).
+export function motivoErro(body, texto = '') {
+  const lista = v => { if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return v.trim() ? [v.trim()] : []; } }
+    return Array.isArray(v) ? v.map(x => String(x ?? '').trim()).filter(Boolean) : []; };
+  if (body && typeof body === 'object') {
+    if (typeof body.erro === 'string' && body.erro.trim()) return body.erro.trim();
+    let r = body.resultado;
+    if (typeof r === 'string') { try { r = JSON.parse(r); } catch { r = null; } }
+    const erros = [...lista(body.erros), ...(r && typeof r === 'object' ? [...lista(r.erros), ...(typeof r.erro === 'string' ? [r.erro] : [])] : [])];
+    if (erros.length) return [...new Set(erros)].slice(0, 5).join('; ') + (erros.length > 5 ? ' (e mais ' + (erros.length - 5) + ')' : '');
+    const e = body.error;
+    if (e && typeof e === 'object' && (e.message || e.code)) return 'Power Automate: ' + [e.code, e.message].filter(Boolean).join(' — ');
+    return '';
+  }
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  return t ? t.slice(0, 200) : '';
 }
 
 export async function loadConfiguracoes(deps = {}) {
