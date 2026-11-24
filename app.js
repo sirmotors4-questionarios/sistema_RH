@@ -11,7 +11,7 @@ import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizaco
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
-import {prepararSincronizacao} from "./rh-pendentes.js";
+import {prepararSincronizacao, recalcularEmLotes} from "./rh-pendentes.js";
 import {unirAdendas} from "./rh-folha.js";
 "use strict";
 
@@ -528,23 +528,23 @@ $("load-month").addEventListener("click",async()=>{
    const x=await operarLancamentos("retirar_pendentes",{ano,mes,mesNome:nomeMes,retirar:retirar.map(({Empresa,Codigo})=>({Empresa,Codigo}))},transp);
    partes.push(x.alteradas+" retirado(s)");if(x.ignoradas)avisos.push(x.ignoradas+" não retirado(s) porque já não estavam Pendentes.");
   }
+  let falhasRecalculo=[];
   if(r.atualizacoes.length){
-   // Em lotes: cada execução do script fica curta (o Power Automate/Excel Online cortam pedidos demorados).
-   // Um lote já gravado não se perde se um seguinte falhar; repetir o Carregar mês recalcula só o que falta.
-   const LOTE=LOTE_RECALCULO,total=r.atualizacoes.length;let feitos=0,alteradas=0;
-   for(let k=0;k<total;k+=LOTE){
-    const lote=r.atualizacoes.slice(k,k+LOTE);
-    progresso.actualizar(4,"A recalcular Pendentes no Excel: "+feitos+" de "+total+"…");
-    const x=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:nomeMes,atualizacoes:lote,utilizador:sessao.email},transp);
-    feitos+=lote.length;alteradas+=x.alteradas;
-   }
-   partes.push(alteradas+" Pendente(s) recalculado(s)");
+   // Em lotes (cada execução do script fica curta); um lote que falhe é dividido até isolar a linha problemática.
+   const total=r.atualizacoes.length;
+   progresso.actualizar(4,"A recalcular Pendentes no Excel: 0 de "+total+"…");
+   const x=await recalcularEmLotes({linhas:r.atualizacoes,lote:LOTE_RECALCULO,
+    operar:lote=>operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:nomeMes,atualizacoes:lote,utilizador:sessao.email},transp),
+    aoProgresso:(feitos,tot,f)=>progresso.actualizar(4,"A recalcular Pendentes no Excel: "+feitos+" de "+tot+(f?" ("+f+" com erro)":"")+"…")});
+   falhasRecalculo=x.falhas;
+   partes.push(x.alteradas+" Pendente(s) recalculado(s)");
   }
   if(introduzir.length){
    progresso.actualizar(5,"A introduzir "+introduzir.length+" colaborador(es) em falta…");
    const x=await operarLancamentos("introduzir_lancamentos",{ano,mes,mesNome:nomeMes,linhas:introduzir},transp);
    partes.push(x.alteradas+" introduzido(s)");
   }
+  if(falhasRecalculo.length)avisos.push(falhasRecalculo.length+" Pendente(s) com erro no Excel, não recalculado(s): "+falhasRecalculo.slice(0,5).map(f=>f.chave).join(", ")+(falhasRecalculo.length>5?" e mais "+(falhasRecalculo.length-5):"")+". Motivo: "+falhasRecalculo[0].motivo);
   if(r.erros.length)avisos.push(r.erros.length+" Pendente(s) não actualizado(s), reveja: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+".":""));
   if(r.aRever.length)avisos.push(r.aRever.length+" Alterado(s)/Finalizado(s) sem contrato no período: "+r.aRever.map(x=>x.chave).join(", ")+".");
   if(r.avisosIntroducao.length&&doMes.length&&escolhaFeita!=="recalcular")avisos.push("Não introduzido(s): "+r.avisosIntroducao.slice(0,3).join(" ")+(r.avisosIntroducao.length>3?" E mais "+(r.avisosIntroducao.length-3)+".":""));

@@ -53,3 +53,18 @@ test('API v3 exige a nova versão do script',async()=>{
  const r=await operarLancamentos('introduzir_lancamentos',{ano:2026,mes:4,mesNome:'Abril',linhas:[{Empresa:'A',Codigo:'1'}]},resp({versao:3,operacao:'introduzir_lancamentos',alteradas:1,linhas:[]}));
  assert.equal(r.alteradas,1);
 });
+import {recalcularEmLotes} from '../rh-pendentes.js';
+test('lotes adaptativos: divide o lote que falha e isola a linha problemática',async()=>{
+ const linhas=Array.from({length:100},(_,i)=>({Empresa:'SIR',Codigo:String(i).padStart(4,'0')}));
+ const gravados=new Set(),erro=Object.assign(Error('Não foi possível executar o Office Script. (500)'),{status:500});
+ const operar=async g=>{if(g.some(l=>l.Codigo==='0087'))throw erro;g.forEach(l=>gravados.add(l.Codigo));return {alteradas:g.length};};
+ const r=await recalcularEmLotes({linhas,lote:40,operar});
+ assert.equal(r.alteradas,99);assert.deepEqual(r.falhas.map(f=>f.chave),['SIR|0087']);assert.match(r.falhas[0].motivo,/500/);
+ assert.equal(gravados.size,99);assert.ok(r.execucoes<=20,'execuções: '+r.execucoes);
+});
+test('lotes adaptativos: lote demorado passa ao ser dividido; erros 4xx não são repetidos',async()=>{
+ const linhas=Array.from({length:40},(_,i)=>({Empresa:'A',Codigo:String(i)}));
+ const r=await recalcularEmLotes({linhas,lote:40,operar:async g=>{if(g.length>20)throw Object.assign(Error('Timeout'),{status:504});return {alteradas:g.length};}});
+ assert.equal(r.alteradas,40);assert.equal(r.falhas.length,0);assert.equal(r.execucoes,3);
+ await assert.rejects(recalcularEmLotes({linhas,operar:async()=>{throw Object.assign(Error('Sem permissão'),{status:403});}}),/Sem permissão/);
+});
