@@ -6,6 +6,9 @@
  * modo "editar"    — altera UMA linha existente (Empresa + Código + Ano + Mês) só nas colunas editáveis;
  *                    recusa se estiver Finalizado; marca Estado do Lançamento = "Alterado".
  * modo "finalizar" — marca todas as linhas do mês como Finalizado / Revisto = Sim.
+ * Operações v3 no modo "editar" (envelope {__rh_operacao}), usadas pelo «Carregar mês»:
+ *   retirar_pendentes      — apaga do mês as linhas indicadas, só se continuarem Pendentes no Excel;
+ *   introduzir_lancamentos — insere novas linhas num mês já existente (mesmas validações do "gravar").
  * Nunca escreve nas 11 colunas calculadas (PROTEGIDAS). Valida tudo antes de escrever.
  * Escalão: se existir tbl_escaloes_lancamento e a coluna "Escalão" (sem fórmula), o gravar preenche-a nas linhas
  * novas e o editar recalcula-a, com o valor do critério da empresa (por omissão Salario Liquido) já recalculado.
@@ -107,6 +110,15 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   let pedido: Record<string, unknown>[] = [];
   try { pedido = JSON.parse(linhas || "[]"); } catch { r.erros.push("linhas não é JSON válido"); return fim(); }
   if (!Array.isArray(pedido)) { r.erros.push("linhas tem de ser uma lista"); return fim(); }
+  // introduzir_lancamentos: as linhas novas vêm no envelope e seguem o caminho do "gravar" (fórmulas, duplicados…).
+  let operacaoInserir = "";
+  if (r.modo === "editar" && pedido.length === 1 && pedido[0] && String(pedido[0]["__rh_operacao"] ?? "") === "introduzir_lancamentos") {
+    const novas = pedido[0]["linhas"];
+    if (!Array.isArray(novas) || !novas.length) { r.erros.push("lista de lançamentos a introduzir inválida"); return fim(); }
+    pedido = novas as Record<string, unknown>[];
+    r.modo = "gravar";
+    operacaoInserir = "introduzir_lancamentos";
+  }
   if (r.modo !== "finalizar" && pedido.length === 0) { r.erros.push("linhas vazio"); return fim(); }
   if (pedido.length > LIMITE_LINHAS) { r.erros.push(`máximo ${LIMITE_LINHAS} linhas por chamada`); return fim(); }
   if (!Number.isInteger(ano) || ano < 1900 || ano > 9999) { r.erros.push("ano inválido"); return fim(); }
@@ -154,8 +166,33 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   const envelope = pedido[0] ?? {};
   const operacao = String(envelope["__rh_operacao"] ?? "");
   if (r.modo === "editar" && operacao) {
-    if (pedido.length !== 1 || ["recalcular_pendentes", "repor_inicial"].indexOf(operacao) < 0) { r.erros.push("operação inválida"); return fim(); }
+    if (pedido.length !== 1 || ["recalcular_pendentes", "repor_inicial", "retirar_pendentes"].indexOf(operacao) < 0) { r.erros.push("operação inválida"); return fim(); }
     if (idx("Estado do Lançamento") < 0) { r.erros.push("coluna Estado do Lançamento em falta"); return fim(); }
+    if (operacao === "retirar_pendentes") {
+      const alvos = envelope["retirar"] as Record<string, unknown>[];
+      if (!Array.isArray(alvos) || !alvos.length || alvos.length > LIMITE_LINHAS) { r.erros.push("lista de lançamentos a retirar inválida"); return fim(); }
+      const apagar: number[] = [], vistosR = new Set<string>();
+      let ignoradasR = 0;
+      for (const a of alvos) {
+        if (!a || typeof a !== "object" || Array.isArray(a)) { r.erros.push("pedido de retirada inválido"); continue; }
+        const k = chave(a.Empresa, a.Codigo, ano, mes), ids = linhasPorChave.get(k) ?? [];
+        if (vistosR.has(k)) { r.erros.push("lançamento repetido no pedido: " + k); continue; }
+        vistosR.add(k);
+        if (ids.length !== 1) { r.erros.push("lançamento inexistente ou duplicado: " + k); continue; }
+        // Revalidar no Excel: só se retira o que continua Pendente (Alterado/Finalizado entretanto ficam).
+        if (norm(estadoCol[ids[0]]) !== "PENDENTE") { ignoradasR++; continue; }
+        apagar.push(ids[0]);
+      }
+      if (r.erros.length) return fim();
+      const filtroR = tabela.getAutoFilter();
+      if (filtroR && filtroR.getIsDataFiltered()) { filtroR.clearCriteria(); r.filtrosLimpos = true; }
+      // De baixo para cima, para os índices das linhas seguintes não mudarem.
+      apagar.sort((x, y) => y - x).forEach(i => tabela.deleteRowsAt(i, 1));
+      r.alteradas = apagar.length;
+      r.linha = JSON.stringify({versao: 3, operacao, alteradas: apagar.length, ignoradas: ignoradasR, linhas: []});
+      r.ok = true;
+      return fim();
+    }
     const referencias = referenciasIniciais(workbook);
     const planos: {i: number; patch: Record<string, unknown>; ref?: ReferenciaInicial; formulas?: Record<string, string>}[] = [];
     let ignoradas = 0;
@@ -349,6 +386,10 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   });
   r.inseridas = matriz.length;
   preencherEscaloes(workbook, corpo, cab, nLinhas, matriz.length);
+  if (operacaoInserir) {
+    r.alteradas = matriz.length;
+    r.linha = JSON.stringify({versao: 3, operacao: operacaoInserir, alteradas: matriz.length, ignoradas: 0, linhas: []});
+  }
   r.ok = true;
   return fim();
 }

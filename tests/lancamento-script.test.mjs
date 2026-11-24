@@ -63,3 +63,41 @@ test('reposição mantém fórmulas existentes nas colunas de entradas',()=>{
  run(w,[{Empresa:'A',Codigo:'1','Horas Trabalhadas':10}]);
  assert.equal(restore(w,'1').ok,true);assert.equal(w.read(0)['Horas Trabalhadas'],'=SUM(RC[-1])');
 });
+
+// ---------- v3: retirar e introduzir (Carregar mês) ----------
+test('retirar apaga só Pendentes indicados e revalida o estado no Excel',()=>{
+ const w=workbook([obj('1'),obj('2','Alterado'),obj('3'),obj('4')]);
+ w.main.deleteRowsAt=(i,n=1)=>w.main.rows.splice(i,n);w.main.getAutoFilter=()=>null;
+ const r=run(w,[{__rh_operacao:'retirar_pendentes',retirar:[{Empresa:'A',Codigo:'1'},{Empresa:'A',Codigo:'2'},{Empresa:'A',Codigo:'3'}]}]);
+ assert.equal(r.ok,true);assert.equal(r.alteradas,2);
+ const l=JSON.parse(r.linha);assert.equal(l.versao,3);assert.equal(l.operacao,'retirar_pendentes');assert.equal(l.ignoradas,1);
+ assert.deepEqual(w.main.rows.map(x=>x[1]),['2','4']);
+});
+test('retirar com lançamento inexistente não apaga nada',()=>{
+ const w=workbook([obj('1'),obj('2')]);w.main.deleteRowsAt=(i,n=1)=>w.main.rows.splice(i,n);w.main.getAutoFilter=()=>null;
+ const r=run(w,[{__rh_operacao:'retirar_pendentes',retirar:[{Empresa:'A',Codigo:'1'},{Empresa:'A',Codigo:'9'}]}]);
+ assert.equal(r.ok,false);assert.equal(w.main.rows.length,2);
+});
+test('introduzir insere num mês existente com as regras do gravar e recusa chaves já existentes',()=>{
+ const PROT=['Estado','Estado de Reforma','Vencimento Base','INSS Colaborador','INSS Empresa','Total INSS','Salario Liquido','Total de Acréscimos','Total de Descontos','IRPS','Vencimento'];
+ const headers=['Empresa','Codigo','Ano','Mês','Nome','Estado do Lançamento',...PROT];
+ const linha=(c)=>['A',c,2026,'Abril','N'+c,'Pendente',...PROT.map(p=>'=F_'+p)];
+ const rows=[linha('0001')];
+ const range=(r,c,nr,nc)=>({getValues:()=>rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(v=>String(v).startsWith('=')?0:v)),
+  getFormulasR1C1:()=>rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(String)),
+  setFormulasR1C1:vs=>vs.forEach((l,i)=>l.forEach((v,j)=>rows[r+i][c+j]=v)),setValues:vs=>vs.forEach((l,i)=>l.forEach((v,j)=>rows[r+i][c+j]=v)),
+  setNumberFormat(){},getColumn:j=>range(r,c+j,nr,1),getRow:i=>range(r+i,c,1,nc),getCell:(i,j)=>range(r+i,c+j,1,1),
+  getRowIndex:()=>r-1,getColumnIndex:()=>c,getWorksheet:()=>({getRangeByIndexes:(ri,ci,nr2,nc2)=>range(ri+1,ci,nr2,nc2)})});
+ const corpo={...range(0,0,1e6,headers.length),getRowIndex:()=>0,getColumnIndex:()=>0,getWorksheet:()=>({getRangeByIndexes:(ri,ci,nr2,nc2)=>range(ri,ci,nr2,nc2)})};
+ corpo.getValues=()=>rows.map(l=>l.map(v=>String(v).startsWith('=')?0:v));corpo.getFormulasR1C1=()=>rows.map(l=>l.map(String));
+ corpo.getColumn=j=>({getValues:()=>rows.map(l=>[String(l[j]).startsWith('=')?0:l[j]])});
+ const t={getHeaderRowRange:()=>({getValues:()=>[headers]}),getRangeBetweenHeaderAndTotal:()=>corpo,getRowCount:()=>rows.length,
+  addRows:(i,vs)=>rows.push(...vs.map(l=>[...l])),getAutoFilter:()=>null};
+ const w={getTable:n=>n==='tbl_lançamento'?t:null,getApplication:()=>({calculate(){}})};
+ const novo=c=>({Empresa:'A',Codigo:c,Nome:'N'+c,'Estado do Lançamento':'Pendente'});
+ const r=JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify([{__rh_operacao:'introduzir_lancamentos',linhas:[novo('0226')]}]),'editar')));
+ assert.equal(r.ok,true,r.erros.join());assert.equal(r.inseridas,1);assert.equal(JSON.parse(r.linha).operacao,'introduzir_lancamentos');
+ assert.equal(rows.length,2);assert.equal(rows[1][1],'0226');assert.equal(rows[1][headers.indexOf('Vencimento')],'=F_Vencimento');
+ const dup=JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify([{__rh_operacao:'introduzir_lancamentos',linhas:[novo('0001')]}]),'editar')));
+ assert.equal(dup.ok,false);assert.equal(rows.length,2);
+});

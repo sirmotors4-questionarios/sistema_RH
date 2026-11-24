@@ -1,5 +1,18 @@
 # Office Scripts — lançamentos salariais
 
+## Activar retirar/introduzir no «Carregar mês» (v3) — OBRIGATÓRIO antes de usar
+
+1. No Excel/Microsoft 365, abra o script **LancamentoNovoMes** usado pelo fluxo **RH_API_Actualizar**,
+   substitua o conteúdo pelo ficheiro [LancamentoNovoMes.ts](LancamentoNovoMes.ts) desta versão e guarde.
+2. Não é preciso mexer no fluxo: as operações novas (`retirar_pendentes`, `introduzir_lancamentos`) passam
+   pelo ramo **lancamento_editar** já existente, como as da v2.
+3. Valide numa cópia do workbook: um mês com um Pendente sem contrato (deve ser apagado), um Alterado sem
+   contrato (não deve ser apagado) e um colaborador activo sem lançamento (deve ser inserido como Pendente,
+   com as fórmulas nas colunas calculadas).
+
+Enquanto o script não for actualizado, o site mostra «O script do Excel ainda não sabe retirar/introduzir
+lançamentos» e não grava nada dessas operações. «Só recalcular Pendentes» continua a funcionar.
+
 ## Activar recálculo de Pendentes e reposição (v2)
 
 1. No Excel/Microsoft 365, abra o script **LancamentoNovoMes** efectivamente usado pela

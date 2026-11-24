@@ -149,12 +149,22 @@ bloqueiam a alteração. Não requer uma nova acção do Power Automate.
 
 ### Carregar Pendentes e voltar ao estado inicial (Office Script v2)
 
-- O clique em **Carregar mês** consulta dados recentes e recalcula somente lançamentos
-  cujo estado é **Pendente**. Continuam Pendentes. Alterados e Finalizados não são escritos.
-  A verificação de estado é repetida no Excel no momento de gravar.
+- O clique em **Carregar mês** consulta dados recentes e sincroniza o mês com o cadastro e os contratos:
+  - **retira** os lançamentos Pendentes de colaboradores sem contrato no período 21–20 (por exemplo, admissão
+    posterior ao fim do período ou contrato cessado);
+  - **recalcula** os restantes Pendentes (continuam Pendentes);
+  - **introduz** os colaboradores activos com contrato vigente que ainda não têm lançamento, com as regras do Novo mês.
+  Antes de retirar ou introduzir, o site mostra a lista e pede confirmação (Aplicar alterações / Só recalcular
+  Pendentes / Cancelar). Alterados e Finalizados nunca são retirados nem recalculados; se já não tiverem contrato,
+  aparecem como «a rever». Só se retira quando o cadastro é inequívoco (um colaborador, um lançamento); colaboradores
+  com dados em falta ou código repetido não são introduzidos e ficam nos avisos. Um mês sem lançamentos continua a
+  ser criado no **Novo mês**. O estado é verificado outra vez no Excel no momento de gravar.
+  Requer o Office Script v3 (ver [office-scripts/README.md](office-scripts/README.md)).
 - A navegação, mudança de mês, relatórios e consultas de acompanhamento continuam apenas
   a ler. O recálculo automático acontece no clique explícito em Carregar mês, com perfil
-  autorizado e URL de gravação configurado. Um bloqueio na preparação impede o lote.
+  autorizado e URL de gravação configurado. Um lançamento bloqueado na preparação (por exemplo, admissão
+  posterior ao período ou colaborador em falta no cadastro) fica de fora, sem alterações e Pendente; os restantes
+  são recalculados e a barra de progresso lista os que precisam de revisão.
 - **Voltar ao estado inicial**, dentro do lançamento, pede confirmação e repõe as entradas
   e condições guardadas antes da alteração, incluindo alterações já gravadas. O estado
   volta a Pendente, Revisto a Não, e as fórmulas são recalculadas. Finalizados não podem ser repostos.

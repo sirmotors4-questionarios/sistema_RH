@@ -11,7 +11,7 @@ import {urlGravacao, guardarUrlGravacao, urlIndemnizacoes, guardarUrlIndemnizaco
 import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
-import {prepararPendentes} from "./rh-pendentes.js";
+import {prepararSincronizacao} from "./rh-pendentes.js";
 import {unirAdendas} from "./rh-folha.js";
 "use strict";
 
@@ -493,33 +493,61 @@ $("load-month").addEventListener("click",async()=>{
  if(!ligado){abrirAcesso();return}
  let progresso;
  try{await operarMes(async()=>{
-  progresso=criarProgresso($("pay-progresso"),"Carregar mês",5);
+  progresso=criarProgresso($("pay-progresso"),"Carregar mês",7);
   const ano=Number(year.value),mes=Number(month.value),sessao=sessaoAcesso();
   $("load-month").textContent="A carregar…";
   if(pedidos.lancamentos)await pedidos.lancamentos;
   await carregarLancamentos({ano,mes});
-  progresso.actualizar(1,"Mês consultado. A ler colaboradores e contratos…");
+  progresso.actualizar(1,"Mês consultado. A ler colaboradores, contratos e o mês anterior…");
   if(!podeGravar()){progresso.concluir("Mês carregado em consulta; perfil sem permissão de recálculo.");showToast("Mês carregado em consulta. O seu perfil não permite recalcular.");return}
   if(!sessao)throw Error("Inicie sessão com o código de acesso para recalcular lançamentos.");
   if(!urlGravacao())throw Error("Mês carregado, sem recálculo: configure o endereço RH_API_Actualizar numa ficha de lançamento.");
-  $("load-month").textContent="A recalcular Pendentes…";
-  await Promise.all([carregar("funcionarios",true),carregar("contratos",true)]);
-  progresso.actualizar(2,"Dados recebidos. A preparar o recálculo…");
+  $("load-month").textContent="A actualizar o mês…";
+  const ant=mes===1?{ano:ano-1,mes:12}:{ano,mes:mes-1};
+  const [,,mesAnterior]=await Promise.all([carregar("funcionarios",true),carregar("contratos",true),carregarMes(ant.ano,ant.mes).catch(()=>[])]);
+  progresso.actualizar(2,"Dados recebidos. A comparar o mês com o cadastro…");
   if(!ligado||sessaoAcesso()?.chave!==sessao?.chave||sessaoAcesso()?.email!==sessao?.email||!podeGravar())throw Error("A sessão mudou. Carregue novamente o mês.");
-  const r=prepararPendentes({ano,mes,lancamentos:doPeriodo(linhas("lancamentos","tbl_lançamento"),ano,mes),
+  const doMes=doPeriodo(linhas("lancamentos","tbl_lançamento"),ano,mes);
+  const r=prepararSincronizacao({ano,mes,lancamentos:doMes,lancamentosAnterior:mesAnterior,
    funcionarios:linhas("funcionarios","tbl_funcionarios"),
    adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),
    parametros:linhas("contratos","tbl_parametros_pagamento"),utilizador:sessao?.email||""});
-  if(r.erros.length)throw Error("Recálculo não efectuado: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+" bloqueio(s).":""));
-  if(!r.linhas.length){progresso.concluir("Não existem lançamentos Pendentes para recalcular.");showToast("Mês carregado. Não existem lançamentos Pendentes para recalcular.");return}
-  progresso.actualizar(3,"A aguardar o recálculo no Excel de "+r.linhas.length+" Pendentes…");
-  const res=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:M.NOME_MES[mes-1],atualizacoes:r.linhas,utilizador:sessao.email},
-   {credenciais:sessao,url:urlGravacao()});
-  progresso.actualizar(4,"Recálculo confirmado. A actualizar os dados apresentados…");
-  meses.delete(ano+"-"+mes);mesesCompletos=false;
-  await carregarLancamentos({ano,mes});
-  progresso.concluir(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
-  showToast(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
+  // Mês sem lançamentos: a criação completa é feita no «Novo mês», com a verificação própria.
+  if(!doMes.length)r.introduzir=[];
+  let retirar=r.retirar,introduzir=r.introduzir,escolhaFeita="aplicar";
+  if(retirar.length||introduzir.length){
+   progresso.actualizar(2,"A aguardar a sua confirmação: "+retirar.length+" a retirar, "+introduzir.length+" a introduzir…");
+   const escolha=await lanc.confirmarSincronizacao({ano,mes,retirar,introduzir,aRever:r.aRever,recalcular:r.atualizacoes.length});
+   if(!escolha){progresso.falhar("Cancelado: nada foi gravado.");showToast("Carregar mês cancelado. Nada foi gravado.");return}
+   escolhaFeita=escolha;if(escolha==="recalcular"){retirar=[];introduzir=[]}
+  }
+  const transp={credenciais:sessao,url:urlGravacao()},nomeMes=M.NOME_MES[mes-1],partes=[],avisos=[];
+  if(retirar.length){
+   progresso.actualizar(3,"A retirar "+retirar.length+" lançamento(s) sem contrato no período…");
+   const x=await operarLancamentos("retirar_pendentes",{ano,mes,mesNome:nomeMes,retirar:retirar.map(({Empresa,Codigo})=>({Empresa,Codigo}))},transp);
+   partes.push(x.alteradas+" retirado(s)");if(x.ignoradas)avisos.push(x.ignoradas+" não retirado(s) porque já não estavam Pendentes.");
+  }
+  if(r.atualizacoes.length){
+   progresso.actualizar(4,"A recalcular "+r.atualizacoes.length+" Pendente(s) no Excel…");
+   const x=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:nomeMes,atualizacoes:r.atualizacoes,utilizador:sessao.email},transp);
+   partes.push(x.alteradas+" Pendente(s) recalculado(s)");
+  }
+  if(introduzir.length){
+   progresso.actualizar(5,"A introduzir "+introduzir.length+" colaborador(es) em falta…");
+   const x=await operarLancamentos("introduzir_lancamentos",{ano,mes,mesNome:nomeMes,linhas:introduzir},transp);
+   partes.push(x.alteradas+" introduzido(s)");
+  }
+  if(r.erros.length)avisos.push(r.erros.length+" Pendente(s) não actualizado(s), reveja: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+".":""));
+  if(r.aRever.length)avisos.push(r.aRever.length+" Alterado(s)/Finalizado(s) sem contrato no período: "+r.aRever.map(x=>x.chave).join(", ")+".");
+  if(r.avisosIntroducao.length&&doMes.length&&escolhaFeita!=="recalcular")avisos.push("Não introduzido(s): "+r.avisosIntroducao.slice(0,3).join(" ")+(r.avisosIntroducao.length>3?" E mais "+(r.avisosIntroducao.length-3)+".":""));
+  if(partes.length){
+   progresso.actualizar(6,"Gravado. A actualizar os dados apresentados…");
+   meses.delete(ano+"-"+mes);mesesCompletos=false;
+   await carregarLancamentos({ano,mes});
+  }
+  const fim=(partes.length?partes.join(" · ")+". Alterados e Finalizados preservados.":"Mês carregado; não havia nada a actualizar.")+(avisos.length?" "+avisos.join(" "):"");
+  progresso.concluir(fim);if(avisos.length)progresso.falhar(fim); // 100% com destaque: há lançamentos a rever
+  showToast(fim);
  })}catch(e){progresso?.falhar(e.message);setSource("lancamentos",e.message);showToast(e.message)}
 });
 

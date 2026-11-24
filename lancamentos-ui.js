@@ -385,5 +385,33 @@ export function iniciarLancamentos(ctx) {
       }}, {texto: "Fechar", click: fechar}]);
   }
 
-  return {preVisualizar, exportarFolha, comparativo, novoMes, editar, finalizar};
+  // ---------- Carregar mês: confirmar o que sai e o que entra ----------
+  // Devolve "aplicar" (retirar + recalcular + introduzir), "recalcular" (só recalcular Pendentes) ou null (cancelar).
+  function confirmarSincronizacao({ano, mes, retirar, introduzir, aRever = [], recalcular = 0}) {
+    return new Promise(resolve => {
+      let decidido = false;
+      const decidir = v => { if (decidido) return; decidido = true; dlg.removeEventListener("close", aoFechar); fechar(); resolve(v); };
+      const aoFechar = () => { if (!decidido) { decidido = true; resolve(null); } };
+      const nome = M.NOME_MES[mes - 1] + "/" + ano;
+      abrir({eyebrow: "CARREGAR MÊS", titulo: "Actualizar " + nome, sub: retirar.length + " a retirar · " + introduzir.length + " a introduzir · " + recalcular + " Pendente(s) a recalcular"});
+      dlg.addEventListener("close", aoFechar);
+      const bloco = [];
+      bloco.push(el("p", {text: "O cadastro e os contratos mudaram desde que o mês foi criado. Confirme as alterações abaixo antes de as gravar."}));
+      if (retirar.length) bloco.push(el("h3", {text: "A retirar (" + retirar.length + ")"}),
+        el("p", {class: "help", text: "Lançamentos Pendentes de colaboradores sem contrato neste período. As linhas são apagadas do mês."}),
+        tabela(["Empresa", "Código", "Nome", "Motivo"], retirar.map(x => [x.Empresa, x.Codigo, x.nome, x.motivo])));
+      if (introduzir.length) bloco.push(el("h3", {text: "A introduzir (" + introduzir.length + ")"}),
+        el("p", {class: "help", text: "Colaboradores com contrato vigente no período que ainda não têm lançamento. Entram como Pendentes, com as regras do Novo mês."}),
+        tabela(["Empresa", "Código", "Nome", "Regime", "Origem"], introduzir.map(l => [l.Empresa, l.Codigo, l.Nome, l.RegimePagamento, l.Origem_Lancamento])));
+      if (aRever.length) bloco.push(el("div", {class: "notice-inline"},
+        el("p", {text: aRever.length + " lançamento(s) Alterado(s)/Finalizado(s) sem contrato no período não são mexidos; reveja-os: " + aRever.map(x => x.chave + " (" + x.motivo + ")").join("; ")})));
+      $("rel-body").replaceChildren(...bloco);
+      accoes([
+        {texto: "Aplicar alterações", classe: "primary", click: () => decidir("aplicar")},
+        {texto: "Só recalcular Pendentes", click: () => decidir("recalcular")},
+        {texto: "Cancelar", click: () => decidir(null)}]);
+    });
+  }
+
+  return {preVisualizar, exportarFolha, comparativo, novoMes, editar, finalizar, confirmarSincronizacao};
 }
