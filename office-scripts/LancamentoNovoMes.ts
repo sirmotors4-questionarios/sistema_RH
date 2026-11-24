@@ -10,6 +10,9 @@
  *   retirar_pendentes      — apaga do mês as linhas indicadas, só se continuarem Pendentes no Excel;
  *   introduzir_lancamentos — insere novas linhas num mês já existente (mesmas validações do "gravar").
  * Nunca escreve nas 11 colunas calculadas (PROTEGIDAS). Valida tudo antes de escrever.
+ * Desempenho (limite de 120 s do Power Automate): cada leitura ao Excel é uma ida ao servidor; as escritas seguem
+ * em lote. Por isso as linhas do mês são lidas num só bloco (valores + fórmulas), os escalões são calculados uma vez
+ * para todas as linhas e o livro é recalculado uma única vez; nenhuma leitura é feita por colaborador.
  * Escalão: se existir tbl_escaloes_lancamento e a coluna "Escalão" (sem fórmula), o gravar preenche-a nas linhas
  * novas e o editar recalcula-a, com o valor do critério da empresa (por omissão Salario Liquido) já recalculado.
  */
@@ -27,6 +30,8 @@ interface Resultado {
   filtrosLimpos?: boolean;
   linha?: string; // JSON da linha recalculada (o Excel não aceita objectos genéricos no retorno)
 }
+// Linhas do mês lidas num só pedido (ini = índice da primeira linha na tabela).
+interface Bloco { ini: number; valores: (string | number | boolean)[][]; formulas: string[][]; }
 const TABELA = "tbl_lançamento";
 const LIMITE_LINHAS = 2000;
 const PROTEGIDAS = ["Estado", "Estado de Reforma", "Vencimento Base", "INSS Colaborador", "INSS Empresa", "Total INSS",
@@ -90,12 +95,19 @@ function referenciasIniciais(workbook: ExcelScript.Workbook): Map<string, {indic
   });
   return mapa;
 }
-function guardarInicial(t: ExcelScript.Table, referencias: Map<string, {indice: number; json: string}>, ref: ReferenciaInicial): void {
-  const json = JSON.stringify(ref), existente = referencias.get(ref.chave);
-  if (json.length > 32000) throw Error("Referência inicial demasiado longa: " + ref.chave);
-  const valores = [[ref.chave, json, new Date().toISOString()]];
-  if (existente) t.getRangeBetweenHeaderAndTotal().getRow(existente.indice).setValues(valores);
-  else { t.addRows(-1, valores); referencias.set(ref.chave, {indice: t.getRowCount() - 1, json}); }
+// Guarda várias referências sem leituras: as existentes são substituídas na sua linha e as novas entram num só addRows.
+function guardarIniciais(t: ExcelScript.Table, referencias: Map<string, {indice: number; json: string}>, refs: ReferenciaInicial[]): void {
+  const agora = new Date().toISOString(), novas: (string)[][] = [];
+  const corpoIni = t.getRangeBetweenHeaderAndTotal();
+  let proximo = referencias.size;
+  for (const ref of refs) {
+    const json = JSON.stringify(ref), existente = referencias.get(ref.chave);
+    if (json.length > 32000) throw Error("Referência inicial demasiado longa: " + ref.chave);
+    const valores = [ref.chave, json, agora];
+    if (existente) corpoIni.getRow(existente.indice).setValues([valores]);
+    else { novas.push(valores); referencias.set(ref.chave, {indice: proximo++, json}); }
+  }
+  if (novas.length) t.addRows(-1, novas);
 }
 
 function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: string, modo: string): Resultado {
@@ -149,15 +161,25 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     if (idx(nome) >= 0) corpo.getCell(i, idx(nome)).setValue(valorCelula(nome, v));
   };
 
-  const objectoLinha = (i: number): Record<string, string | number | boolean> => {
-    const valores = corpo.getRow(i).getValues()[0], obj: Record<string, string | number | boolean> = {};
+  // Leitura em bloco das linhas indicadas (do primeiro ao último índice): 1 pedido de valores + 1 de fórmulas,
+  // em vez de 2 pedidos por colaborador.
+  const folha = corpo.getWorksheet(), linha0 = corpo.getRowIndex(), coluna0 = corpo.getColumnIndex();
+  const lerBloco = (indices: number[], comFormulas = true): Bloco => {
+    let ini = indices[0], ult = indices[0];
+    for (const i of indices) { if (i < ini) ini = i; if (i > ult) ult = i; }
+    const rg = folha.getRangeByIndexes(linha0 + ini, coluna0, ult - ini + 1, cab.length);
+    return {ini, valores: rg.getValues(), formulas: comFormulas ? rg.getFormulasR1C1().map(l => l.map(f => String(f))) : []};
+  };
+  let bloco: Bloco = {ini: 0, valores: [], formulas: []};
+  const objectoLinha = (i: number, b: Bloco = bloco): Record<string, string | number | boolean> => {
+    const valores = b.valores[i - b.ini], obj: Record<string, string | number | boolean> = {};
     cab.forEach((h, j) => { obj[h] = valores[j]; });
     return obj;
   };
   const referencia = (i: number, patch: Record<string, unknown> = {}): ReferenciaInicial => {
     const linha = objectoLinha(i), valores: Record<string, string | number | boolean> = {};
     for (const h of CAMPOS_INICIAIS) if (idx(h) >= 0) valores[h] = Object.prototype.hasOwnProperty.call(patch, h) ? valorCelula(h, patch[h]) : linha[h];
-    const formulas: Record<string, string> = {}, originais = corpo.getRow(i).getFormulasR1C1()[0];
+    const formulas: Record<string, string> = {}, originais = bloco.formulas[i - bloco.ini];
     for (const h of CAMPOS_INICIAIS) if (idx(h) >= 0 && !Object.prototype.hasOwnProperty.call(patch, h) && String(originais[idx(h)]).startsWith("=")) formulas[h] = String(originais[idx(h)]);
     return {chave: chave(linha.Empresa, linha.Codigo, ano, mes), valores, formulas};
   };
@@ -187,7 +209,14 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
       const filtroR = tabela.getAutoFilter();
       if (filtroR && filtroR.getIsDataFiltered()) { filtroR.clearCriteria(); r.filtrosLimpos = true; }
       // De baixo para cima, para os índices das linhas seguintes não mudarem.
-      apagar.sort((x, y) => y - x).forEach(i => tabela.deleteRowsAt(i, 1));
+      // Linhas seguidas saem num só pedido.
+      apagar.sort((x, y) => y - x);
+      for (let p = 0; p < apagar.length;) {
+        let q = p;
+        while (q + 1 < apagar.length && apagar[q + 1] === apagar[q] - 1) q++;
+        tabela.deleteRowsAt(apagar[q], q - p + 1);
+        p = q + 1;
+      }
       r.alteradas = apagar.length;
       r.linha = JSON.stringify({versao: 3, operacao, alteradas: apagar.length, ignoradas: ignoradasR, linhas: []});
       r.ok = true;
@@ -218,9 +247,14 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
           r.erros.push("condições inválidas: " + k);
         if (norm(patch.RegimePagamento) === "MENSAL" && (vazio(dias) || !isFinite(Number(dias)) || Number(dias) < 0 || Number(dias) > 30))
           r.erros.push("dias inválidos: " + k);
-        const ref = referencia(i, patch);
-        if (JSON.stringify(ref).length > 32000) r.erros.push("referência inicial demasiado longa: " + k);
-        planos.push({i, patch, ref});
+        planos.push({i, patch});
+      }
+      if (planos.length && !r.erros.length) {
+        bloco = lerBloco(planos.map(p => p.i));
+        for (const p of planos) {
+          p.ref = referencia(p.i, p.patch);
+          if (JSON.stringify(p.ref).length > 32000) r.erros.push("referência inicial demasiado longa: " + p.ref.chave);
+        }
       }
     } else {
       const k = chave(envelope.Empresa, envelope.Codigo, ano, mes), ids = linhasPorChave.get(k) ?? [];
@@ -247,19 +281,22 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     }
     if (r.erros.length) return fim();
     // Guardar a referência antes de qualquer alteração salarial. Recalcular mantém Pendente.
-    if (planos.some(p => Boolean(p.ref))) {
-      const t = tabelaIniciais(workbook);
-      for (const p of planos) if (p.ref) guardarInicial(t, referencias, p.ref);
-    }
+    const refs = planos.filter(p => Boolean(p.ref)).map(p => p.ref as ReferenciaInicial);
+    if (refs.length) guardarIniciais(tabelaIniciais(workbook), referencias, refs);
     for (const p of planos) {
       for (const h of Object.keys(p.patch)) if (CHAVE.indexOf(h) < 0 && !p.formulas?.[h]) definir(p.i, h, p.patch[h]);
-      for (const h of Object.keys(p.formulas ?? {})) corpo.getCell(p.i, idx(h)).setFormulaR1C1(p.formulas[h]);
+      const fp: Record<string, string> = p.formulas ?? {};
+      for (const h of Object.keys(fp)) corpo.getCell(p.i, idx(h)).setFormulaR1C1(fp[h]);
       if (operacao === "repor_inicial") { definir(p.i, "Estado do Lançamento", "Pendente"); definir(p.i, "Revisto", "Não"); }
     }
-    workbook.getApplication().calculate(ExcelScript.CalculationType.full);
-    for (const p of planos) preencherEscaloes(workbook, corpo, cab, p.i, 1);
+    if (planos.length) {
+      workbook.getApplication().calculate(ExcelScript.CalculationType.recalculate);
+      preencherEscaloes(workbook, corpo, cab, planos.map(p => p.i));
+    }
     r.alteradas = planos.length;
-    r.linha = JSON.stringify({versao: 2, operacao, alteradas: planos.length, ignoradas, linhas: operacao === "repor_inicial" ? planos.map(p => objectoLinha(p.i)) : []});
+    let devolver: Record<string, string | number | boolean>[] = [];
+    if (operacao === "repor_inicial" && planos.length) { const depois = lerBloco(planos.map(p => p.i), false); devolver = planos.map(p => objectoLinha(p.i, depois)); }
+    r.linha = JSON.stringify({versao: 2, operacao, alteradas: planos.length, ignoradas, linhas: devolver});
     r.ok = true;
     return fim();
   }
@@ -300,19 +337,20 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     if (r.erros.length) return fim();
     // Captura apenas Pendentes: não inventa uma origem para lançamentos já Alterados.
     if (norm(estadoCol[i]) === "PENDENTE") {
+      bloco = lerBloco([i]);
       const ref = referencia(i);
       if (JSON.stringify(ref).length > 32000) { r.erros.push("referência inicial demasiado longa"); return fim(); }
-      guardarInicial(tabelaIniciais(workbook), referenciasIniciais(workbook), ref);
+      guardarIniciais(tabelaIniciais(workbook), referenciasIniciais(workbook), [ref]);
     }
     for (const p of campos) {
       const v = o[p];
       definir(i, p, v);
     }
     definir(i, "Estado do Lançamento", "Alterado");
-    workbook.getApplication().calculate(ExcelScript.CalculationType.full);
-    preencherEscaloes(workbook, corpo, cab, i, 1);
+    workbook.getApplication().calculate(ExcelScript.CalculationType.recalculate);
+    preencherEscaloes(workbook, corpo, cab, [i]);
     // Devolve a linha já recalculada (Vencimento, INSS, IRPS, Líquido…) para o site actualizar só esta linha.
-    const valores = corpo.getRow(i).getValues()[0];
+    const valores = lerBloco([i], false).valores[0];
     const obj: { [k: string]: string | number | boolean } = {};
     cab.forEach((h, j) => { obj[h] = valores[j]; });
     r.linha = JSON.stringify(obj);
@@ -324,7 +362,9 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   // Só o novo mês precisa das fórmulas de referência: ler as fórmulas de toda a tabela é o passo mais
   // pesado do script, por isso editar e finalizar não o fazem.
   if (nLinhas === 0) { r.erros.push("tabela sem linhas: não é possível obter as fórmulas de referência"); return fim(); }
-  const todas = corpo.getFormulasR1C1();
+  // As fórmulas de referência vêm das últimas linhas (as mais recentes), não da tabela inteira.
+  const AMOSTRA = 300, iniAmostra = Math.max(0, nLinhas - AMOSTRA);
+  const todas = folha.getRangeByIndexes(linha0 + iniAmostra, coluna0, nLinhas - iniAmostra, cab.length).getFormulasR1C1();
   const formulasRef: string[] = cab.map((_, j) => {
     const conta = new Map<string, number>();
     for (const l of todas) { const f = String(l[j]); if (f.startsWith("=")) conta.set(f, (conta.get(f) ?? 0) + 1); }
@@ -374,18 +414,18 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   const filtro = tabela.getAutoFilter();
   if (filtro && filtro.getIsDataFiltered()) { filtro.clearCriteria(); r.filtrosLimpos = true; }
   tabela.addRows(undefined, matriz);
-  const novo = corpo.getWorksheet().getRangeByIndexes(
-    corpo.getRowIndex() + nLinhas, corpo.getColumnIndex(), matriz.length, cab.length);
+  const novo = folha.getRangeByIndexes(linha0 + nLinhas, coluna0, matriz.length, cab.length);
   const jc = idx("Codigo");
   novo.getColumn(jc).setNumberFormat("@");
   novo.getColumn(jc).setValues(matriz.map(l => [String(l[jc])]));
+  // Uma só leitura das fórmulas do bloco novo (em vez de uma por coluna calculada).
+  const actuais = novo.getFormulasR1C1();
   cab.forEach((_, j) => {
     if (!ehFormula[j]) return;
-    const actual = novo.getColumn(j).getFormulasR1C1();
-    novo.getColumn(j).setFormulasR1C1(actual.map((l, i) => [comFormula[i][j] ? formulasRef[j] : l[0]]));
+    novo.getColumn(j).setFormulasR1C1(actuais.map((l, i) => [comFormula[i][j] ? formulasRef[j] : l[j]]));
   });
   r.inseridas = matriz.length;
-  preencherEscaloes(workbook, corpo, cab, nLinhas, matriz.length);
+  preencherEscaloes(workbook, corpo, cab, matriz.map((_, n) => nLinhas + n));
   if (operacaoInserir) {
     r.alteradas = matriz.length;
     r.linha = JSON.stringify({versao: 3, operacao: operacaoInserir, alteradas: matriz.length, ignoradas: 0, linhas: []});
@@ -398,13 +438,13 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
 // Um escalão começa no seu Valor_Inicial (inclusive) e vai até ao início do seguinte; o último não tem limite.
 // A empresa "Todas" vale para as empresas sem escalões próprios. Sem tabela ou sem coluna, não faz nada.
 interface DefEscalao { criterio: string; faixas: { escalao: string; inicio: number }[]; }
-function preencherEscaloes(workbook: ExcelScript.Workbook, corpo: ExcelScript.Range, cab: string[], inicio: number, n: number) {
+// Calcula o escalão das linhas indicadas com uma só leitura do bloco (do primeiro ao último índice).
+// Linhas seguidas são escritas de uma vez; caso contrário, célula a célula (escritas não esperam pelo servidor).
+function preencherEscaloes(workbook: ExcelScript.Workbook, corpo: ExcelScript.Range, cab: string[], indices: number[]) {
   const j = cab.indexOf("Escalão");
+  if (j < 0 || !indices.length) return;
   const tEsc = workbook.getTable("tbl_escaloes_lancamento");
-  if (j < 0 || !tEsc || n <= 0 || tEsc.getRowCount() === 0) return;
-  const bloco = corpo.getWorksheet().getRangeByIndexes(corpo.getRowIndex() + inicio, corpo.getColumnIndex(), n, cab.length);
-  const colEsc = bloco.getColumn(j);
-  if (colEsc.getFormulas().some(f => String(f[0]).startsWith("="))) return;
+  if (!tEsc || tEsc.getRowCount() === 0) return;
   const ce = tEsc.getHeaderRowRange().getValues()[0].map(v => String(v));
   const iE = ce.indexOf("Empresa"), iC = ce.indexOf("Criterio"), iN = ce.indexOf("Escalao"), iV = ce.indexOf("Valor_Inicial");
   const mapa = new Map<string, DefEscalao>();
@@ -417,16 +457,23 @@ function preencherEscaloes(workbook: ExcelScript.Workbook, corpo: ExcelScript.Ra
   }
   if (!mapa.size) return;
   mapa.forEach(d => d.faixas.sort((a, b) => a.inicio - b.inicio));
-  const valores = bloco.getValues();
+  let ini = indices[0], ult = indices[0];
+  for (const i of indices) { if (i < ini) ini = i; if (i > ult) ult = i; }
+  const bloco = corpo.getWorksheet().getRangeByIndexes(corpo.getRowIndex() + ini, corpo.getColumnIndex(), ult - ini + 1, cab.length);
+  const valores = bloco.getValues(), formulas = bloco.getColumn(j).getFormulas();
+  // Coluna Escalão com fórmula nas linhas alvo: o Excel calcula-a, o script não escreve.
+  if (indices.some(i => String(formulas[i - ini][0]).startsWith("="))) return;
   const iEmp = cab.indexOf("Empresa");
-  colEsc.setValues(valores.map(l => {
+  const escalao = (l: (string | number | boolean)[]): string => {
     const d = mapa.get(String(l[iEmp] ?? "").trim().toUpperCase()) || mapa.get("TODAS");
-    if (!d) return [""];
+    if (!d) return "";
     const k = cab.indexOf(d.criterio), bruto = k >= 0 ? l[k] : "";
     const v = Number(bruto);
-    if (bruto === "" || bruto === null || !isFinite(v)) return [""];
+    if (bruto === "" || bruto === null || !isFinite(v)) return "";
     let r = "";
     for (const f of d.faixas) if (v >= f.inicio) r = f.escalao;
-    return [r];
-  }));
+    return r;
+  };
+  if (indices.length === ult - ini + 1) bloco.getColumn(j).setValues(valores.map(l => [escalao(l)]));
+  else for (const i of indices) bloco.getCell(i - ini, j).setValue(escalao(valores[i - ini]));
 }

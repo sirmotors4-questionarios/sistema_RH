@@ -5,14 +5,16 @@ import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 // Executa o próprio Office Script com uma tabela em memória: nenhuma chamada ao Excel real.
 const source=stripTypeScriptTypes(readFileSync(new URL('../office-scripts/LancamentoNovoMes.ts',import.meta.url),'utf8'));
-const ctx=vm.createContext({ExcelScript:{CalculationType:{full:'full'}}});vm.runInContext(source,ctx);
-const cab=['Empresa','Codigo','Ano','Mês','Estado do Lançamento','Revisto','RegimePagamento','Valor Unitário','Dias Trabalhados','Data Inicio Contrato','Data Fim Contrato','Subsídios','Faltas Injustificadas','Horas Trabalhadas','Observações','Utilizador Alteracao','Data Ultima Alteracao','Vencimento'];
+const ctx=vm.createContext({ExcelScript:{CalculationType:{full:'full',recalculate:'recalculate'}}});vm.runInContext(source,ctx);
+const cab=['Empresa','Codigo','Ano','Mês','Estado do Lançamento','Revisto','RegimePagamento','Valor Unitário','Dias Trabalhados','Data Inicio Contrato','Data Fim Contrato','Subsídios','Faltas Injustificadas','Horas Trabalhadas','Observações','Utilizador Alteracao','Data Ultima Alteracao','Vencimento','Escalão'];
 const obj=(code,state='Pendente')=>({Empresa:'A',Codigo:code,Ano:2026,'Mês':'Abril','Estado do Lançamento':state,Revisto:'Não',RegimePagamento:'Mensal','Valor Unitário':10000,'Dias Trabalhados':30,'Subsídios':500,'Faltas Injustificadas':2,'Observações':'Inicial',Vencimento:10000});
 function workbook(objects){
- const tables=new Map();let calculations=0;
+ const tables=new Map();let calculations=0,leituras=0;
  function table(headers,rows,name){
-  const range=(r=0,c=0,nr=rows.length,nc=headers.length)=>({getValues:()=>rows.slice(r,r+nr).map(l=>l.slice(c,c+nc)),
-   getFormulasR1C1:()=>rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(String)),setFormulaR1C1:v=>rows[r][c]=v,
+  const range=(r=0,c=0,nr=rows.length,nc=headers.length)=>({getValues:()=>{leituras++;return rows.slice(r,r+nr).map(l=>l.slice(c,c+nc))},
+   getFormulasR1C1:()=>{leituras++;return rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(String))},setFormulaR1C1:v=>rows[r][c]=v,
+   getFormulas:()=>{leituras++;return rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(String))},
+   getWorksheet:()=>({getRangeByIndexes:(ri,ci,a,b)=>range(ri,ci,a,b)}),getRowIndex:()=>r,getColumnIndex:()=>c,
    setValues:vs=>vs.forEach((l,i)=>l.forEach((v,j)=>rows[r+i][c+j]=v)),setValue:v=>rows[r][c]=v,
    getRow:i=>range(r+i,c,1,nc),getColumn:j=>range(r,c+j,nr,1),getCell:(i,j)=>range(r+i,c+j,1,1)});
   const t={getHeaderRowRange:()=>({getValues:()=>[headers]}),getRangeBetweenHeaderAndTotal:()=>range(),getRowCount:()=>rows.length,
@@ -21,7 +23,7 @@ function workbook(objects){
  const main=table(cab,objects.map(o=>cab.map(h=>o[h]??'')),'tbl_lançamento');
  return {tables,main,getTable:n=>tables.get(n),getApplication:()=>({calculate:()=>{calculations++;for(const l of main.rows)l[cab.indexOf('Vencimento')]=l[cab.indexOf('Valor Unitário')]*l[cab.indexOf('Dias Trabalhados')]/30}}),
   addWorksheet:()=>{let headers;return {getRange:()=>({setValues:v=>headers=v[0]}),addTable:()=>table(headers,[]) }},
-  get calculations(){return calculations},read:i=>Object.fromEntries(cab.map((h,j)=>[h,main.rows[i][j]]))};
+  get calculations(){return calculations},get leituras(){return leituras},read:i=>Object.fromEntries(cab.map((h,j)=>[h,main.rows[i][j]]))};
 }
 const run=(w,rows)=>JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify(rows),'editar')));
 const patch=code=>({Empresa:'A',Codigo:code,RegimePagamento:'Mensal','Valor Unitário':18000,'Dias Trabalhados':10,'Data Inicio Contrato':46123,'Data Fim Contrato':'','Utilizador Alteracao':'teste','Data Ultima Alteracao':46200});
@@ -100,4 +102,28 @@ test('introduzir insere num mês existente com as regras do gravar e recusa chav
  assert.equal(rows.length,2);assert.equal(rows[1][1],'0226');assert.equal(rows[1][headers.indexOf('Vencimento')],'=F_Vencimento');
  const dup=JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify([{__rh_operacao:'introduzir_lancamentos',linhas:[novo('0001')]}]),'editar')));
  assert.equal(dup.ok,false);assert.equal(rows.length,2);
+});
+
+// ---------- desempenho: leituras ao Excel não dependem do número de colaboradores ----------
+test('recalcular 200 Pendentes faz um número fixo de leituras ao Excel',()=>{
+ const contar=n=>{const w=workbook(Array.from({length:n},(_,i)=>obj(String(i+1))));const antes=w.leituras;
+  const r=batch(w,Array.from({length:n},(_,i)=>String(i+1)));assert.equal(r.ok,true);assert.equal(r.alteradas,n);return w.leituras-antes;};
+ const poucas=contar(2),muitas=contar(200);
+ assert.equal(muitas,poucas,'leituras: '+poucas+' com 2 linhas, '+muitas+' com 200');
+ assert.ok(muitas<=15,'leituras a mais: '+muitas);
+});
+test('escalões preenchidos numa só passagem, também em linhas não seguidas',()=>{
+ const w=workbook([obj('1'),obj('2','Alterado'),obj('3')]);
+ const esc=[['A','Vencimento','E1',0],['A','Vencimento','E2',5000],['A','Vencimento','E3',8000]];
+ w.tables.set('tbl_escaloes_lancamento',{getRowCount:()=>esc.length,getHeaderRowRange:()=>({getValues:()=>[['Empresa','Criterio','Escalao','Valor_Inicial']]}),getRangeBetweenHeaderAndTotal:()=>({getValues:()=>esc})});
+ const r=batch(w,['1','2','3']);assert.equal(r.ok,true);assert.equal(r.alteradas,2);
+ assert.equal(w.read(0).Vencimento,6000);assert.equal(w.read(0)['Escalão'],'E2');assert.equal(w.read(2)['Escalão'],'E2');assert.equal(w.read(1)['Escalão'],'');
+ // Edição de uma linha recalcula o escalão dessa linha.
+ run(w,[{Empresa:'A',Codigo:'3','Dias Trabalhados':15}]);assert.equal(w.read(2).Vencimento,9000);assert.equal(w.read(2)['Escalão'],'E3');
+});
+test('retirar linhas seguidas usa um só pedido de remoção',()=>{
+ const w=workbook([obj('1'),obj('2'),obj('3'),obj('4'),obj('5')]);const chamadas=[];
+ w.main.deleteRowsAt=(i,n=1)=>{chamadas.push([i,n]);w.main.rows.splice(i,n)};w.main.getAutoFilter=()=>null;
+ const r=run(w,[{__rh_operacao:'retirar_pendentes',retirar:['2','3','4','1'].map(c=>({Empresa:'A',Codigo:c}))}]);
+ assert.equal(r.ok,true);assert.deepEqual(chamadas,[[0,4]]);assert.deepEqual(w.main.rows.map(x=>x[1]),['5']);
 });
