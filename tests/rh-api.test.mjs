@@ -95,3 +95,18 @@ test('escalões vão pelo fluxo das indemnizações com dados.modulo', async () 
   assert.deepEqual(r, {gravados: 2, linhas: [{Empresa: 'X'}]});
   assert.deepEqual(await escaloesLer({getToken, fetchImpl, url: 'u'}), [{Empresa: 'X'}]);
 });
+
+import {motivoErro} from '../rh-api.js';
+test('erros do fluxo/script/Power Automate aparecem em vez de "resposta inválida"', async () => {
+  const resp = (status, corpo) => ({getToken: async () => 't', url: 'https://example.test',
+    fetchImpl: async () => ({ok: status < 300, status, text: async () => typeof corpo === 'string' ? corpo : JSON.stringify(corpo)})});
+  await assert.rejects(callApi('lancamento_editar', resp(404, {ok: false, erros: ['lançamento inexistente ou duplicado: SIR|0226|2026|NOVEMBRO']})),
+    e => /SIR\|0226/.test(e.message) && /\(404\)/.test(e.message));
+  await assert.rejects(callApi('lancamento_finalizar', resp(404, {ok: false, resultado: JSON.stringify({ok: false, erros: ['não há lançamentos para este mês']})})),
+    /não há lançamentos para este mês/);
+  await assert.rejects(callApi('x', resp(404, {error: {code: 'WorkflowNotFound', message: 'Flow not found'}})), /WorkflowNotFound/);
+  await assert.rejects(callApi('x', resp(200, {ok: false, erros: ['ano inválido']})), /ano inválido/);
+  await assert.rejects(callApi('x', resp(502, '<html>Bad Gateway</html>')), /Bad Gateway/);
+  await assert.rejects(callApi('x', resp(404, '')), /resposta inválida \(404\)/);
+  assert.equal(motivoErro({erro: 'Sem permissão'}), 'Sem permissão');
+});
