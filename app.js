@@ -510,16 +510,21 @@ $("load-month").addEventListener("click",async()=>{
    funcionarios:linhas("funcionarios","tbl_funcionarios"),
    adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),
    parametros:linhas("contratos","tbl_parametros_pagamento"),utilizador:sessao?.email||""});
-  if(r.erros.length)throw Error("Recálculo não efectuado: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+" bloqueio(s).":""));
-  if(!r.linhas.length){progresso.concluir("Não existem lançamentos Pendentes para recalcular.");showToast("Mês carregado. Não existem lançamentos Pendentes para recalcular.");return}
+  // Lançamentos bloqueados ficam de fora (continuam Pendentes, sem alterações); os restantes são recalculados.
+  const ignorados=r.erros.length?" "+r.erros.length+" Pendente(s) não recalculado(s), reveja: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+".":""):"";
+  if(!r.linhas.length){
+   const msg=r.erros.length?"Nenhum Pendente recalculado."+ignorados:"Não existem lançamentos Pendentes para recalcular.";
+   if(r.erros.length)progresso.falhar(msg);else progresso.concluir(msg);
+   showToast("Mês carregado. "+msg);return}
   progresso.actualizar(3,"A aguardar o recálculo no Excel de "+r.linhas.length+" Pendentes…");
   const res=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:M.NOME_MES[mes-1],atualizacoes:r.linhas,utilizador:sessao.email},
    {credenciais:sessao,url:urlGravacao()});
   progresso.actualizar(4,"Recálculo confirmado. A actualizar os dados apresentados…");
   meses.delete(ano+"-"+mes);mesesCompletos=false;
   await carregarLancamentos({ano,mes});
-  progresso.concluir(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
-  showToast(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
+  const fim=res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados."+ignorados;
+  progresso.concluir(fim);if(r.erros.length)progresso.falhar(fim); // 100% com destaque: há lançamentos a rever
+  showToast(fim);
  })}catch(e){progresso?.falhar(e.message);setSource("lancamentos",e.message);showToast(e.message)}
 });
 

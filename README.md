@@ -154,7 +154,9 @@ bloqueiam a alteração. Não requer uma nova acção do Power Automate.
   A verificação de estado é repetida no Excel no momento de gravar.
 - A navegação, mudança de mês, relatórios e consultas de acompanhamento continuam apenas
   a ler. O recálculo automático acontece no clique explícito em Carregar mês, com perfil
-  autorizado e URL de gravação configurado. Um bloqueio na preparação impede o lote.
+  autorizado e URL de gravação configurado. Um lançamento bloqueado na preparação (por exemplo, admissão
+  posterior ao período ou colaborador em falta no cadastro) fica de fora, sem alterações e Pendente; os restantes
+  são recalculados e a barra de progresso lista os que precisam de revisão.
 - **Voltar ao estado inicial**, dentro do lançamento, pede confirmação e repõe as entradas
   e condições guardadas antes da alteração, incluindo alterações já gravadas. O estado
   volta a Pendente, Revisto a Não, e as fórmulas são recalculadas. Finalizados não podem ser repostos.

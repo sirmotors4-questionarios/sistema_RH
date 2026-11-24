@@ -10,12 +10,18 @@ test('lote só prepara pendentes, mantém entradas e estados dos restantes',()=>
  assert.deepEqual(r.erros,[]);assert.equal(r.linhas.length,1);assert.equal(r.preservados,3);
  assert.equal(r.linhas[0]['Dias Trabalhados'],10);assert.ok(!('Estado do Lançamento' in r.linhas[0]));assert.deepEqual(lancamentos,antes);
 });
-test('bloqueios e duplicados impedem preparar um lote parcial',()=>{
- for(const funcionarios of [[],[f('1'),f('1')]]){
-  const r=prepararPendentes({lancamentos:[row('1','Pendente')],funcionarios,ano:2026,mes:4});
-  assert.ok(r.erros.length);assert.equal(r.linhas.length,0);
+test('bloqueios ficam de fora sem impedir os restantes Pendentes',()=>{
+ for(const funcionarios of [[f('2')],[f('1'),f('1'),f('2')]]){
+  const r=prepararPendentes({lancamentos:[row('1','Pendente'),row('2','Pendente')],funcionarios,ano:2026,mes:4});
+  assert.equal(r.erros.length,1);assert.match(r.erros[0],/^A\|0001: /);assert.equal(r.linhas.length,1);assert.equal(r.linhas[0].Codigo,'0002');
  }
- const r=prepararPendentes({lancamentos:[row('1','Pendente'),row('1','Pendente')],funcionarios:[f('1')],ano:2026,mes:4});assert.ok(r.erros.length);assert.equal(r.linhas.length,0);
+ // Lançamento repetido: nenhuma das cópias é recalculada.
+ const rep=prepararPendentes({lancamentos:[row('1','Pendente'),row('1','Pendente'),row('2','Pendente')],funcionarios:[f('1'),f('2')],ano:2026,mes:4});
+ assert.equal(rep.erros.length,1);assert.match(rep.erros[0],/repetido/);assert.deepEqual(rep.linhas.map(l=>l.Codigo),['0002']);
+ // Admissão posterior ao período (caso real SIR|0226): fica de fora, os outros seguem.
+ const tarde={...f('3'),'Data Admissao':'2026-05-02'};
+ const adm=prepararPendentes({lancamentos:[row('2','Pendente'),row('3','Pendente')],funcionarios:[f('2'),tarde],ano:2026,mes:4});
+ assert.equal(adm.linhas.length,1);assert.match(adm.erros[0],/^A\|0003: Admissão posterior/);
 });
 test('API usa envelope no ramo editar e exige confirmação v2',async()=>{
  let pedido;
