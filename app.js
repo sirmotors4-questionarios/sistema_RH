@@ -544,16 +544,59 @@ function mostrarUtilizador(u){
 function botoes(){const conta=Boolean(currentAccount()),codigo=Boolean(sessaoAcesso());
  $("code-signin").hidden=conta||codigo;$("signin").hidden=conta||codigo||!authConfigured();$("signout").hidden=!(conta||codigo);$("trocar-codigo").hidden=!(codigo&&PODE_TROCAR_CODIGO(utilizadorActual));
  document.querySelectorAll("[data-reload]").forEach(b=>b.hidden=!(conta||codigo))}
-function ligar(quem,via){
- ligado=true;botoes();
- $("status-pill").textContent="● Ligado";$("source-title").textContent="Sessão iniciada";$("source-sub").textContent=quem;
- estadoLigacao("live","Sessão iniciada: "+quem,"Entrada por "+via+". Os administradores RH podem criar e editar colaboradores; os restantes perfis só consultam.");
- (precisa[paginaActual]||[]).forEach(m=>carregar(m));
- if(paginaActual==="painel")painel.abrir();
- if(paginaActual==="relatorios")relatorios.abrir();
- if(paginaActual==="indemnizacoes")indemn.abrir();
+let arranqueActivo = null, arranqueGeracao = 0, entradaActual = null;
+function fecharArranque(){
+ $("arranque").hidden=true;document.body.classList.remove("a-iniciar");document.querySelector(".app").inert=false;
 }
+function ligar(quem,via){
+ if(arranqueActivo)return arranqueActivo;
+ entradaActual={quem,via};
+ const geracao=++arranqueGeracao;
+ $("arranque").hidden=false;document.body.classList.add("a-iniciar");document.querySelector(".app").inert=true;
+ $("arranque-accoes").hidden=true;$("arranque-config").hidden=true;$("arranque-titulo").focus();
+ const progresso=criarProgresso($("arranque-progresso"),"Preparar sistema",20);
+ const verificar=()=>{if(geracao!==arranqueGeracao)throw Error("Sessão interrompida.");};
+ arranqueActivo=(async()=>{
+  try{
+   progresso.actualizar(0,"A validar a sessão e as permissões…");
+   const config=await loadConfiguracoes(transporte());verificar();
+   if(config.utilizador?.trocarCodigo&&PODE_TROCAR_CODIGO(config.utilizador)&&sessaoAcesso()){
+    entradaPendente={email:quem};fecharArranque();abrirTroca("obrigatoria");return;
+   }
+   ligado=true;fecharAcesso();botoes();if(config.utilizador)mostrarUtilizador(config.utilizador);
+   $("status-pill").textContent="● Ligado";$("source-title").textContent="Sessão iniciada";$("source-sub").textContent=quem;
+   estadoLigacao("live","Sessão iniciada: "+quem,"Entrada por "+via+".");
+   const etapas=[["funcionarios","A carregar os colaboradores…"],["contratos","A carregar contratos e adendas…"],["lancamentos","A carregar o mês de lançamento salarial…"],["ferias","A preparar os indicadores da página principal…"]];
+   let feitas=1;
+   for(const [modulo,descricao] of etapas){progresso.actualizar(feitas,descricao);await carregar(modulo);verificar();feitas++;}
+   progresso.actualizar(5,"A carregar indemnizações e prestações…");
+   if(!sessaoAcesso()||!urlIndemnizacoes()){
+    $("arranque-config").hidden=!sessaoAcesso();
+    throw Error(sessaoAcesso()?"Falta configurar o endereço de gestão das indemnizações neste navegador.":"Para carregar as indemnizações, entre com o seu código de acesso.");
+   }
+   await indemn.preparar();verificar();
+   progresso.actualizar(6,"A preparar o Dashboard RH e o histórico de 12 meses…");
+   await painel.abrir(false,{estrito:true,progresso:(n,total,descricao)=>{verificar();progresso.actualizar(6+n,descricao||"Dashboard RH: "+n+" de "+total+" meses lidos.");}});verificar();
+   progresso.actualizar(19,"A apresentar as páginas carregadas…");
+   render();
+   progresso.concluir("Lançamentos, indemnizações, Dashboard RH e página principal prontos.");
+   await new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)));verificar();
+   fecharArranque();$("crumb").setAttribute("tabindex","-1");$("crumb").focus();
+  }catch(e){
+   if(geracao!==arranqueGeracao)return;
+   progresso.falhar(e.message||String(e));$("arranque-accoes").hidden=false;
+  }
+ })().finally(()=>{if(geracao===arranqueGeracao)arranqueActivo=null;});
+ return arranqueActivo;
+}
+$("arranque-repetir").addEventListener("click",()=>{painel.limpar();if(entradaActual)ligar(entradaActual.quem,entradaActual.via);});
+$("arranque-config").addEventListener("submit",ev=>{ev.preventDefault();try{guardarUrlIndemnizacoes($("arranque-url").value);$("arranque-url").value="";$("arranque-repetir").click();}catch(e){showToast(e.message)}});
+$("arranque-sair").addEventListener("click",()=>{
+ if(sessaoAcesso()){sairAcesso();desligar();abrirAcesso();}else signOut().catch(e=>showToast(e.message));
+});
+
 function desligar(){
+ arranqueGeracao++;arranqueActivo=null;fecharArranque();
  painel.limpar();relatorios.limpar();indemn.limpar();cacheIndemn=null;
  ligado=false;Object.keys(dados).forEach(k=>delete dados[k]);botoes();$("nav-acessos").hidden=true;$("nav-config").hidden=true;if(paginaActual==="acessos")go("dashboard");
  $("status-pill").textContent="● Ambiente de demonstração";$("source-title").textContent="Modo demonstração";$("source-sub").textContent="Sem ligação";$("avatar").textContent="RH";$("avatar").title="";
@@ -578,6 +621,7 @@ function passo(troca){
  ["troca-actual","troca-novo","troca-confirmar"].forEach(id=>$(id).value="");
 }
 function abrirAcesso(erro=""){
+ fecharArranque();
  passo(null);mostrarCampoUrl(!urlGuardada());$("access-error").textContent=erro;$("access-code").value="";
  ecra.hidden=false;document.body.classList.add("sem-sessao");
  ($("access-email").value?$("access-code"):$("access-email")).focus();
@@ -594,9 +638,9 @@ async function entrar(){
  // Só os perfis que o fluxo de gestão aceita (Superadministrador, Administrador RH) podem trocar o código no site.
  if(r.utilizador.trocarCodigo&&PODE_TROCAR_CODIGO(r.utilizador)){entradaPendente={email:s.email};abrirTroca("obrigatoria");return}
  if(r.utilizador.trocarCodigo)setTimeout(()=>showToast("Está a usar um código temporário. Peça ao Superadministrador para o substituir."),800);
- concluirEntrada(s.email);
+ await concluirEntrada(s.email);
 }
-function concluirEntrada(email){fecharAcesso();entradaPendente=null;ligar(email,"código de acesso")}
+function concluirEntrada(email){fecharAcesso();entradaPendente=null;return ligar(email,"código de acesso")}
 async function trocar(){
  const s=sessaoAcesso();if(!s)throw Error("A sessão terminou. Entre de novo.");
  const novo=$("troca-novo").value,conf=$("troca-confirmar").value;
@@ -609,7 +653,7 @@ async function trocar(){
  await acessoTrocar({chaveActual:s.chave,chaveNova},{credenciais:s,url:urlIndemnizacoes()});
  actualizarChaveSessao(chaveNova);
  showToast("Código de acesso alterado.");
- if(modoTroca==="obrigatoria")concluirEntrada(s.email);else fecharAcesso();
+ if(modoTroca==="obrigatoria")await concluirEntrada(s.email);else fecharAcesso();
 }
 $("code-signin").addEventListener("click",()=>abrirAcesso());
 $("trocar-codigo").addEventListener("click",()=>abrirTroca("voluntaria"));
@@ -720,6 +764,7 @@ function lerIndemnizacoes(forcar=false){
 // ---------- Indemnizações (fluxo próprio RH_API_Indemnizacoes) ----------
 const indemn=iniciarIndemnizacoes({
  ligado:()=>ligado,
+ ler:forcar=>lerIndemnizacoes(forcar),
  temUrl:()=>Boolean(sessaoAcesso()&&urlIndemnizacoes()),
  guardarUrl:url=>guardarUrlIndemnizacoes(url),
  transporte:()=>({credenciais:sessaoAcesso(),url:urlIndemnizacoes()}),

@@ -47,99 +47,98 @@ export function mesesAte({ano, mes}, n = MESES_HISTORICO) {
 
 export function iniciarPainel(ctx) {
   const $ = id => document.getElementById(id);
-  let iframe = null, pronto = null, aCarregar = false;
-
-  function estado(txt) { $("painel-estado").textContent = txt; }
-
+  let iframe = null, pronto = null, activo = null, carregado = false, geracao = 0;
+  let removerOuvinte = null, resposta = null, pedido = 0, rejeitarPronto = null;
+  const estado = txt => { $("painel-estado").textContent = txt; };
   function garantirIframe() {
     if (iframe) return pronto;
     iframe = document.createElement("iframe");
-    iframe.id = "painel-frame";
-    iframe.title = "Dashboard RH";
-    iframe.src = "painel.html";
-    pronto = new Promise(ok => {
+    iframe.id = "painel-frame"; iframe.title = "Dashboard RH"; iframe.src = "painel.html";
+    pronto = new Promise((ok, falha) => {
+      const timer = setTimeout(() => falha(Error("O dashboard não respondeu. Tente novamente.")), 180000);
+      rejeitarPronto = () => { clearTimeout(timer); falha(Error("Dashboard interrompido.")); };
       const ouvir = ev => {
         if (ev.origin !== location.origin || ev.source !== iframe?.contentWindow) return;
-        if (ev.data?.tipo === "rh-dashboard-ola") ok();
-        if (ev.data?.tipo === "rh-dashboard-pronto") estado("Dashboard actualizado: " + new Date().toLocaleTimeString("pt-MZ", {hour: "2-digit", minute: "2-digit"}));
-        if (ev.data?.tipo === "rh-dashboard-erro") estado("Erro no dashboard: " + ev.data.erro);
-        if (ev.data?.tipo === "rh-dashboard-reiniciar") reiniciar();
+        if (ev.data?.tipo === "rh-dashboard-ola") { clearTimeout(timer); ok(); }
+        if (ev.data?.tipo === "rh-dashboard-pronto" && ev.data.pedido === resposta?.pedido) resposta.ok();
+        if (ev.data?.tipo === "rh-dashboard-erro" && ev.data.pedido === resposta?.pedido) resposta.falha(Error(ev.data.erro));
+        if (ev.data?.tipo === "rh-dashboard-reiniciar") { limpar(); abrir(true); }
       };
       window.addEventListener("message", ouvir);
+      removerOuvinte = () => window.removeEventListener("message", ouvir);
     });
+    pronto.catch(() => {});
     $("painel-quadro").replaceChildren(iframe);
     return pronto;
   }
-
-  async function lerMeses(lista, forcar) {
-    const rows = [], falhas = [];
-    let feitos = 0;
-    const fila = [...lista];
+  async function lerMeses(lista, forcar, progresso, g) {
+    const rows = [], falhas = [], fila = [...lista]; let feitos = 0;
     async function trabalhador() {
-      while (fila.length) {
+      while (fila.length && g === geracao) {
         const p = fila.shift();
         try { rows.push(...await ctx.carregarMes(p.ano, p.mes, forcar)); } catch { falhas.push(p); }
-        feitos += 1;
+        if (g !== geracao) return;
+        feitos++;
         estado(`A ler lançamentos… ${feitos} de ${lista.length} meses`);
+        progresso?.(feitos, lista.length);
       }
     }
-    await Promise.all([trabalhador(), trabalhador(), trabalhador()]); // 3 leituras em paralelo
+    await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
     return {rows, falhas};
   }
-
-  async function abrir(forcar = false) {
-    if (!ctx.ligado()) { $("painel-vazio").hidden = false; $("painel-conteudo").hidden = true; return; }
+  function abrir(forcar = false, {estrito = false, progresso} = {}) {
+    if (!ctx.ligado()) { $("painel-vazio").hidden = false; $("painel-conteudo").hidden = true; return Promise.resolve(); }
     $("painel-vazio").hidden = true; $("painel-conteudo").hidden = false;
-    if (iframe && !forcar) return;
-    if (aCarregar) return;
-    aCarregar = true; $("painel-actualizar").disabled = true;
-    const t0 = Date.now();
-    try {
-      const espera = garantirIframe();
-      estado("A ler o cadastro de colaboradores…");
-      const funcionarios = await ctx.funcionarios(forcar);
-      // Último mês com lançamentos (o sistema procura-o ao entrar); sem ele, o mês actual.
-      const ultimo = (await ctx.periodoMaisRecente()) || {ano: new Date().getFullYear(), mes: new Date().getMonth() + 1};
-      const lista = mesesAte(ultimo);
-      const {rows, falhas} = await lerMeses(lista, forcar);
-      // Indemnizações: só se a página Indemnizações já estiver ligada (fluxo próprio); sem isso o painel avisa.
-      let ind = null;
-      if (ctx.indemnizacoes) { estado("A ler as indemnizações…"); ind = await ctx.indemnizacoes(forcar).catch(() => null); }
-      const nome = p => M.NOME_MES[p.mes - 1].slice(0, 3) + " " + p.ano;
-      const meta = {
-        gerado: new Date().toLocaleString("pt-MZ", {dateStyle: "short", timeStyle: "short"}),
-        indemnizacoes: Boolean(ind),
-        meses: `${nome(lista[0])} – ${nome(lista[lista.length - 1])} (${MESES_HISTORICO} meses)` + (falhas.length ? ` · ${falhas.length} mês(es) não lidos` : "")
-      };
-      await espera;
-      iframe.contentWindow.postMessage({tipo: "rh-dashboard-dados", dados: {
-        funcionarios: linhasFuncionarios(funcionarios), lancamentos: linhasLancamentos(rows),
-        indemnizacoes: linhasIndemnizacoes(ind?.indemnizacoes), prestacoes: linhasPrestacoes(ind?.prestacoes), meta}}, location.origin);
-      estado(`Dados enviados (${Math.round((Date.now() - t0) / 1000)} s): ${funcionarios.length} colaboradores, ${rows.length} lançamentos` +
-        (falhas.length ? ` · não foi possível ler ${falhas.map(nome).join(", ")}` : "") + ". A abrir o dashboard…");
-    } catch (e) {
-      estado("Não foi possível preparar o dashboard: " + (e.message || e));
-    } finally {
-      aCarregar = false; $("painel-actualizar").disabled = false;
-    }
+    if (activo) return activo;
+    if (carregado && !forcar) return Promise.resolve();
+    const g = geracao;
+    const verificar = () => { if (g !== geracao) throw Error("Dashboard interrompido."); };
+    $("painel-actualizar").disabled = true;
+    activo = (async () => {
+      try {
+        const espera = garantirIframe();
+        estado("A ler o cadastro de colaboradores…");
+        const funcionarios = await ctx.funcionarios(forcar); verificar();
+        const ultimo = (await ctx.periodoMaisRecente()) || {ano: new Date().getFullYear(), mes: new Date().getMonth() + 1}; verificar();
+        const lista = mesesAte(ultimo);
+        const {rows, falhas} = await lerMeses(lista, forcar, progresso, g); verificar();
+        if (estrito && falhas.length) throw Error("Dashboard: não foi possível ler " + falhas.length + " mês(es) do histórico. Tente novamente.");
+        let ind = null;
+        if (ctx.indemnizacoes) ind = await ctx.indemnizacoes(forcar).catch(e => { if (estrito) throw e; return null; });
+        verificar();
+        const nome = p => M.NOME_MES[p.mes - 1].slice(0, 3) + " " + p.ano;
+        const meta = {gerado: new Date().toLocaleString("pt-MZ", {dateStyle: "short", timeStyle: "short"}), indemnizacoes: Boolean(ind),
+          meses: `${nome(lista[0])} – ${nome(lista[lista.length - 1])} (${MESES_HISTORICO} meses)` + (falhas.length ? ` · ${falhas.length} mês(es) não lidos` : "")};
+        await espera; verificar();
+        const id = ++pedido;
+        estado("A apresentar os gráficos do Dashboard RH…");
+        progresso?.(12, 12, "A apresentar os gráficos do Dashboard RH…");
+        await new Promise((ok, falha) => {
+          const timer = setTimeout(() => falha(Error("O dashboard não terminou a apresentação. Tente novamente.")), 180000);
+          resposta = {pedido: id, ok: () => { clearTimeout(timer); ok(); }, falha: e => { clearTimeout(timer); falha(e); }};
+          iframe.contentWindow.postMessage({tipo: "rh-dashboard-dados", pedido: id, dados: {
+            funcionarios: linhasFuncionarios(funcionarios), lancamentos: linhasLancamentos(rows),
+            indemnizacoes: linhasIndemnizacoes(ind?.indemnizacoes), prestacoes: linhasPrestacoes(ind?.prestacoes), meta}}, location.origin);
+        });
+        verificar(); carregado = true;
+        estado("Dashboard actualizado: " + new Date().toLocaleTimeString("pt-MZ", {hour: "2-digit", minute: "2-digit"}));
+      } catch (e) {
+        if (g === geracao) estado("Não foi possível preparar o dashboard: " + (e.message || e));
+        if (estrito) throw e;
+      } finally {
+        if (g === geracao) { activo = null; resposta = null; $("painel-actualizar").disabled = false; }
+      }
+    })();
+    return activo;
   }
-
-  // «Tentar de novo» (pedido pelo próprio dashboard quando não arranca): novo iframe e nova leitura.
-  function reiniciar() {
-    if (iframe) iframe.remove();
-    iframe = null; pronto = null;
-    abrir(true);
-  }
-
-  // Ao terminar sessão, o dashboard e os dados que tem são descartados.
   function limpar() {
+    geracao++; rejeitarPronto?.(); resposta?.falha(Error("Dashboard interrompido.")); removerOuvinte?.();
     if (iframe) iframe.remove();
-    iframe = null; pronto = null;
-    $("painel-quadro").replaceChildren();
-    estado("");
-    $("painel-vazio").hidden = false; $("painel-conteudo").hidden = true;
+    iframe = null; pronto = null; activo = null; resposta = null; carregado = false;
+    removerOuvinte = rejeitarPronto = null;
+    $("painel-quadro").replaceChildren(); estado("");
+    $("painel-vazio").hidden = false; $("painel-conteudo").hidden = true; $("painel-actualizar").disabled = false;
   }
-
-  $("painel-actualizar").addEventListener("click", () => abrir(true));
+  $("painel-actualizar").addEventListener("click", () => { limpar(); abrir(true); });
   return {abrir, limpar};
 }
