@@ -9,13 +9,13 @@ const ctx=vm.createContext({ExcelScript:{CalculationType:{full:'full',recalculat
 const cab=['Empresa','Codigo','Ano','Mês','Estado do Lançamento','Revisto','RegimePagamento','Valor Unitário','Dias Trabalhados','Data Inicio Contrato','Data Fim Contrato','Subsídios','Faltas Injustificadas','Horas Trabalhadas','Observações','Utilizador Alteracao','Data Ultima Alteracao','Vencimento','Escalão'];
 const obj=(code,state='Pendente')=>({Empresa:'A',Codigo:code,Ano:2026,'Mês':'Abril','Estado do Lançamento':state,Revisto:'Não',RegimePagamento:'Mensal','Valor Unitário':10000,'Dias Trabalhados':30,'Subsídios':500,'Faltas Injustificadas':2,'Observações':'Inicial',Vencimento:10000});
 function workbook(objects){
- const tables=new Map();let calculations=0,leituras=0;
+ const tables=new Map();let calculations=0,leituras=0,escritas=0;
  function table(headers,rows,name){
   const range=(r=0,c=0,nr=rows.length,nc=headers.length)=>({getValues:()=>{leituras++;return rows.slice(r,r+nr).map(l=>l.slice(c,c+nc))},
    getFormulasR1C1:()=>{leituras++;return rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(String))},setFormulaR1C1:v=>rows[r][c]=v,
    getFormulas:()=>{leituras++;return rows.slice(r,r+nr).map(l=>l.slice(c,c+nc).map(String))},
    getWorksheet:()=>({getRangeByIndexes:(ri,ci,a,b)=>range(ri,ci,a,b)}),getRowIndex:()=>r,getColumnIndex:()=>c,
-   setValues:vs=>vs.forEach((l,i)=>l.forEach((v,j)=>rows[r+i][c+j]=v)),setValue:v=>rows[r][c]=v,
+   setValues:vs=>{escritas++;vs.forEach((l,i)=>l.forEach((v,j)=>rows[r+i][c+j]=v))},setValue:v=>{escritas++;rows[r][c]=v},
    getRow:i=>range(r+i,c,1,nc),getColumn:j=>range(r,c+j,nr,1),getCell:(i,j)=>range(r+i,c+j,1,1)});
   const t={getHeaderRowRange:()=>({getValues:()=>[headers]}),getRangeBetweenHeaderAndTotal:()=>range(),getRowCount:()=>rows.length,
    addRows:(i,vs)=>rows.push(...vs.map(l=>[...l])),setName:n=>tables.set(n,t),rows,headers};if(name)tables.set(name,t);return t;
@@ -23,7 +23,7 @@ function workbook(objects){
  const main=table(cab,objects.map(o=>cab.map(h=>o[h]??'')),'tbl_lançamento');
  return {tables,main,getTable:n=>tables.get(n),getApplication:()=>({calculate:()=>{calculations++;for(const l of main.rows)l[cab.indexOf('Vencimento')]=l[cab.indexOf('Valor Unitário')]*l[cab.indexOf('Dias Trabalhados')]/30}}),
   addWorksheet:()=>{let headers;return {getRange:()=>({setValues:v=>headers=v[0]}),addTable:()=>table(headers,[]) }},
-  get calculations(){return calculations},get leituras(){return leituras},read:i=>Object.fromEntries(cab.map((h,j)=>[h,main.rows[i][j]]))};
+  get calculations(){return calculations},get leituras(){return leituras},get escritas(){return escritas},read:i=>Object.fromEntries(cab.map((h,j)=>[h,main.rows[i][j]]))};
 }
 const run=(w,rows)=>JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify(rows),'editar')));
 const patch=code=>({Empresa:'A',Codigo:code,RegimePagamento:'Mensal','Valor Unitário':18000,'Dias Trabalhados':10,'Data Inicio Contrato':46123,'Data Fim Contrato':'','Utilizador Alteracao':'teste','Data Ultima Alteracao':46200});
@@ -126,4 +126,25 @@ test('retirar linhas seguidas usa um só pedido de remoção',()=>{
  w.main.deleteRowsAt=(i,n=1)=>{chamadas.push([i,n]);w.main.rows.splice(i,n)};w.main.getAutoFilter=()=>null;
  const r=run(w,[{__rh_operacao:'retirar_pendentes',retirar:['2','3','4','1'].map(c=>({Empresa:'A',Codigo:c}))}]);
  assert.equal(r.ok,true);assert.deepEqual(chamadas,[[0,4]]);assert.deepEqual(w.main.rows.map(x=>x[1]),['5']);
+});
+
+// ---------- escrita por blocos (Finalizar esgotava o tempo com getCell célula a célula) ----------
+const fin=(w,meta={'Utilizador Alteracao':'rh@sir','Data Ultima Alteracao':46350})=>JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify([meta]),'finalizar')));
+test('finalizar 300 lançamentos escreve por colunas, não célula a célula',()=>{
+ const w=workbook(Array.from({length:300},(_,i)=>obj(String(i+1),i===10?'Finalizado':'Pendente')));const antes=w.escritas;
+ const r=fin(w);assert.equal(r.ok,true);assert.equal(r.alteradas,299);
+ // 4 colunas × 2 blocos (antes e depois da linha já Finalizada).
+ assert.equal(w.escritas-antes,8,'escritas: '+(w.escritas-antes));
+ for(const i of [0,9,11,299]){assert.equal(w.read(i)['Estado do Lançamento'],'Finalizado');assert.equal(w.read(i).Revisto,'Sim');assert.equal(w.read(i)['Utilizador Alteracao'],'rh@sir');assert.equal(w.read(i)['Data Ultima Alteracao'],46350);}
+ assert.equal(w.read(10)['Utilizador Alteracao'],'');
+});
+test('finalizar só toca nas linhas do mês',()=>{
+ const outro={...obj('9'),'Mês':'Março'};const w=workbook([obj('1'),outro,obj('2')]);
+ const r=fin(w);assert.equal(r.alteradas,2);assert.equal(w.read(1)['Estado do Lançamento'],'Pendente');assert.equal(w.read(1).Revisto,'Não');
+ assert.equal(w.read(0)['Estado do Lançamento'],'Finalizado');assert.equal(w.read(2)['Estado do Lançamento'],'Finalizado');
+});
+test('recalcular 200 Pendentes escreve por colunas',()=>{
+ const w=workbook(Array.from({length:200},(_,i)=>obj(String(i+1))));const antes=w.escritas;
+ const r=batch(w,Array.from({length:200},(_,i)=>String(i+1)));assert.equal(r.ok,true);
+ assert.ok(w.escritas-antes<=12,'escritas: '+(w.escritas-antes));assert.equal(w.read(199)['Dias Trabalhados'],10);assert.equal(w.read(199)['Valor Unitário'],18000);
 });
