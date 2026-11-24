@@ -1,3 +1,4 @@
+import {criarProgresso} from "./rh-progresso.js";
 import {authConfigured, initAuth, currentAccount, signIn, signOut, getToken} from "./rh-auth.js";
 import {iniciarRelatorios} from "./relatorios-ui.js";
 import {iniciarIndemnizacoes} from "./indemnizacoes-ui.js";
@@ -488,30 +489,38 @@ async function operarMes(acao) {
  try{return await acao()}finally{operacaoMes=false;controles.forEach((b,i)=>b.disabled=estados[i]);botao.textContent=texto}
 }
 $("load-month").addEventListener("click",async()=>{
+ if(operacaoMes)return;
  if(!ligado){abrirAcesso();return}
+ let progresso;
  try{await operarMes(async()=>{
+  progresso=criarProgresso($("pay-progresso"),"Carregar mês",5);
   const ano=Number(year.value),mes=Number(month.value),sessao=sessaoAcesso();
   $("load-month").textContent="A carregar…";
   if(pedidos.lancamentos)await pedidos.lancamentos;
   await carregarLancamentos({ano,mes});
-  if(!podeGravar()){showToast("Mês carregado em consulta. O seu perfil não permite recalcular.");return}
+  progresso.actualizar(1,"Mês consultado. A ler colaboradores e contratos…");
+  if(!podeGravar()){progresso.concluir("Mês carregado em consulta; perfil sem permissão de recálculo.");showToast("Mês carregado em consulta. O seu perfil não permite recalcular.");return}
   if(!sessao)throw Error("Inicie sessão com o código de acesso para recalcular lançamentos.");
   if(!urlGravacao())throw Error("Mês carregado, sem recálculo: configure o endereço RH_API_Actualizar numa ficha de lançamento.");
   $("load-month").textContent="A recalcular Pendentes…";
   await Promise.all([carregar("funcionarios",true),carregar("contratos",true)]);
+  progresso.actualizar(2,"Dados recebidos. A preparar o recálculo…");
   if(!ligado||sessaoAcesso()?.chave!==sessao?.chave||sessaoAcesso()?.email!==sessao?.email||!podeGravar())throw Error("A sessão mudou. Carregue novamente o mês.");
   const r=prepararPendentes({ano,mes,lancamentos:doPeriodo(linhas("lancamentos","tbl_lançamento"),ano,mes),
    funcionarios:linhas("funcionarios","tbl_funcionarios"),
    adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),
    parametros:linhas("contratos","tbl_parametros_pagamento"),utilizador:sessao?.email||""});
   if(r.erros.length)throw Error("Recálculo não efectuado: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+" bloqueio(s).":""));
-  if(!r.linhas.length){showToast("Mês carregado. Não existem lançamentos Pendentes para recalcular.");return}
+  if(!r.linhas.length){progresso.concluir("Não existem lançamentos Pendentes para recalcular.");showToast("Mês carregado. Não existem lançamentos Pendentes para recalcular.");return}
+  progresso.actualizar(3,"A aguardar o recálculo no Excel de "+r.linhas.length+" Pendentes…");
   const res=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:M.NOME_MES[mes-1],atualizacoes:r.linhas,utilizador:sessao.email},
    {credenciais:sessao,url:urlGravacao()});
+  progresso.actualizar(4,"Recálculo confirmado. A actualizar os dados apresentados…");
   meses.delete(ano+"-"+mes);mesesCompletos=false;
   await carregarLancamentos({ano,mes});
+  progresso.concluir(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
   showToast(res.alteradas+" Pendentes recalculados. Alterados e Finalizados preservados.");
- })}catch(e){setSource("lancamentos",e.message);showToast(e.message)}
+ })}catch(e){progresso?.falhar(e.message);setSource("lancamentos",e.message);showToast(e.message)}
 });
 
 // ---------- sessão ----------
@@ -651,7 +660,7 @@ const lanc=iniciarLancamentos({
   return {colunas:p.colunas.map(id=>porId.get(id)).filter(Boolean),ordem:p.ordem&&porId.get(p.ordem.id)?{col:porId.get(p.ordem.id),dir:p.ordem.dir}:null,personalizada:!LC.eDefault({...p,ordem:null}),
    filtrar:brutas=>LC.filtrarCabecalho(M.lancamentos(brutas),filtrosCab,porId).map(m=>m.linha),
    filtrosTexto:Object.entries(filtrosCab).filter(([id])=>porId.has(id)).map(([id,v])=>porId.get(id).rotulo+": "+(v.length>3?v.length+" valores":v.map(x=>x||"(vazias)").join(", "))).join(" · ")}},
- carregarMes,esquecerMes:(a,m)=>{meses.delete(a+"-"+m);mesesCompletos=false},
+ operarMes,carregarMes,esquecerMes:(a,m)=>{meses.delete(a+"-"+m);mesesCompletos=false},
  funcionarios:forcar=>carregar("funcionarios",forcar).then(()=>linhas("funcionarios","tbl_funcionarios")),
  contratos:forcar=>carregar("contratos",forcar).then(()=>({adendas:unirAdendas(linhas("contratos","tbl_adendas"),linhas("contratos","tbl_adendas_colaborador"),linhas("contratos","tbl_adendas_detalhes")),parametros:linhas("contratos","tbl_parametros_pagamento")})),
  podeGravar,utilizador:()=>sessaoAcesso()?.email||"",urlGravacao,guardarUrlGravacao,
