@@ -23,6 +23,7 @@ const mockEmployees = [
  {codigo:"0004",nome:"Colaborador Exemplo D",empresa:"Empresa C",departamento:"Financeiro",profissao:"Contabilista",regime:"Mensal",estado:"Activo"}
 ];
 const MAX_LINHAS = 300;
+const LOTE_RECALCULO = 40; // Pendentes por execução do Office Script no «Carregar mês»
 const $ = id => document.getElementById(id);
 const labels={dashboard:"Visão geral",painel:"Dashboard RH",colaboradores:"Colaboradores",adendas:"Adendas",salarios:"Lançamento salarial",ferias:"Férias",indemnizacoes:"Indemnizações",relatorios:"Relatórios",acessos:"Acessos",configuracoes:"Configurações"};
 // Página -> módulos do fluxo de que precisa.
@@ -528,9 +529,16 @@ $("load-month").addEventListener("click",async()=>{
    partes.push(x.alteradas+" retirado(s)");if(x.ignoradas)avisos.push(x.ignoradas+" não retirado(s) porque já não estavam Pendentes.");
   }
   if(r.atualizacoes.length){
-   progresso.actualizar(4,"A recalcular "+r.atualizacoes.length+" Pendente(s) no Excel…");
-   const x=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:nomeMes,atualizacoes:r.atualizacoes,utilizador:sessao.email},transp);
-   partes.push(x.alteradas+" Pendente(s) recalculado(s)");
+   // Em lotes: cada execução do script fica curta (o Power Automate/Excel Online cortam pedidos demorados).
+   // Um lote já gravado não se perde se um seguinte falhar; repetir o Carregar mês recalcula só o que falta.
+   const LOTE=LOTE_RECALCULO,total=r.atualizacoes.length;let feitos=0,alteradas=0;
+   for(let k=0;k<total;k+=LOTE){
+    const lote=r.atualizacoes.slice(k,k+LOTE);
+    progresso.actualizar(4,"A recalcular Pendentes no Excel: "+feitos+" de "+total+"…");
+    const x=await operarLancamentos("recalcular_pendentes",{ano,mes,mesNome:nomeMes,atualizacoes:lote,utilizador:sessao.email},transp);
+    feitos+=lote.length;alteradas+=x.alteradas;
+   }
+   partes.push(alteradas+" Pendente(s) recalculado(s)");
   }
   if(introduzir.length){
    progresso.actualizar(5,"A introduzir "+introduzir.length+" colaborador(es) em falta…");
