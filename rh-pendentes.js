@@ -60,3 +60,29 @@ export function prepararSincronizacao({lancamentos, lancamentosAnterior = [], fu
   return {retirar, aRever, atualizacoes: recalculo.linhas, erros: recalculo.erros, preservados: recalculo.preservados,
     introduzir, avisosIntroducao, periodo: per};
 }
+
+// Recálculo em lotes adaptativos: se uma execução do script falhar por erro do servidor (500/502/504, tempo
+// esgotado), o lote é dividido ao meio e repetido, até isolar a linha que falha. Essa linha fica em `falhas`
+// e as restantes são gravadas. O recálculo é idempotente (volta a escrever as mesmas condições), por isso repetir
+// um lote parcialmente gravado é seguro. Erros de validação/permissão (4xx) não são repetidos.
+export const repetivel = e => Number(e?.status) >= 500 || e?.code === 'RH_NETWORK';
+export async function recalcularEmLotes({linhas, lote = 40, operar, aoProgresso = () => {}}) {
+  let feitos = 0, alteradas = 0, execucoes = 0;
+  const falhas = [];
+  const chaveDe = l => String(l.Empresa ?? '').trim() + '|' + String(l.Codigo ?? '').trim();
+  async function correr(grupo) {
+    try {
+      execucoes++;
+      const x = await operar(grupo);
+      alteradas += Number(x?.alteradas) || 0; feitos += grupo.length; aoProgresso(feitos, linhas.length, falhas.length);
+    } catch (e) {
+      if (!repetivel(e)) throw e;
+      if (grupo.length === 1) { falhas.push({chave: chaveDe(grupo[0]), motivo: e.message || String(e)}); feitos++; aoProgresso(feitos, linhas.length, falhas.length); return; }
+      const meio = Math.ceil(grupo.length / 2);
+      await correr(grupo.slice(0, meio));
+      await correr(grupo.slice(meio));
+    }
+  }
+  for (let k = 0; k < linhas.length; k += lote) await correr(linhas.slice(k, k + lote));
+  return {alteradas, falhas, execucoes};
+}
