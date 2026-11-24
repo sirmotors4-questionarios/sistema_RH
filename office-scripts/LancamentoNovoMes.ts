@@ -171,6 +171,19 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     return {ini, valores: rg.getValues(), formulas: comFormulas ? rg.getFormulasR1C1().map(l => l.map(f => String(f))) : []};
   };
   let bloco: Bloco = {ini: 0, valores: [], formulas: []};
+  // Escrita por blocos: cada sequência de linhas seguidas recebe a coluna num só pedido, em vez de célula a célula
+  // (o Excel Online esgota o tempo com milhares de getCell/setValue — «Range getCell: Timeout»).
+  const sequencias = (indices: number[]): number[][] => {
+    const ord = indices.slice().sort((x, y) => x - y), out: number[][] = [];
+    for (const i of ord) { const u = out[out.length - 1]; if (u && u[u.length - 1] === i - 1) u.push(i); else if (!u || u[u.length - 1] !== i) out.push([i]); }
+    return out;
+  };
+  const escreverColuna = (nome: string, valores: Map<number, unknown>) => {
+    const j = idx(nome);
+    if (j < 0 || !valores.size) return;
+    for (const s of sequencias(Array.from(valores.keys())))
+      folha.getRangeByIndexes(linha0 + s[0], coluna0 + j, s.length, 1).setValues(s.map(i => [valorCelula(nome, valores.get(i))]));
+  };
   const objectoLinha = (i: number, b: Bloco = bloco): Record<string, string | number | boolean> => {
     const valores = b.valores[i - b.ini], obj: Record<string, string | number | boolean> = {};
     cab.forEach((h, j) => { obj[h] = valores[j]; });
@@ -283,12 +296,17 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     // Guardar a referência antes de qualquer alteração salarial. Recalcular mantém Pendente.
     const refs = planos.filter(p => Boolean(p.ref)).map(p => p.ref as ReferenciaInicial);
     if (refs.length) guardarIniciais(tabelaIniciais(workbook), referencias, refs);
+    // Valores agrupados por coluna e escritos por blocos de linhas seguidas; fórmulas da referência célula a célula
+    // (só na reposição, que é de uma linha).
+    const porColuna = new Map<string, Map<number, unknown>>();
+    const juntar = (h: string, i: number, v: unknown) => { let c = porColuna.get(h); if (!c) { c = new Map<number, unknown>(); porColuna.set(h, c); } c.set(i, v); };
     for (const p of planos) {
-      for (const h of Object.keys(p.patch)) if (CHAVE.indexOf(h) < 0 && !p.formulas?.[h]) definir(p.i, h, p.patch[h]);
       const fp: Record<string, string> = p.formulas ?? {};
+      for (const h of Object.keys(p.patch)) if (CHAVE.indexOf(h) < 0 && !fp[h]) juntar(h, p.i, p.patch[h]);
       for (const h of Object.keys(fp)) corpo.getCell(p.i, idx(h)).setFormulaR1C1(fp[h]);
-      if (operacao === "repor_inicial") { definir(p.i, "Estado do Lançamento", "Pendente"); definir(p.i, "Revisto", "Não"); }
+      if (operacao === "repor_inicial") { juntar("Estado do Lançamento", p.i, "Pendente"); juntar("Revisto", p.i, "Não"); }
     }
+    porColuna.forEach((valores, h) => escreverColuna(h, valores));
     if (planos.length) {
       workbook.getApplication().calculate(ExcelScript.CalculationType.recalculate);
       preencherEscaloes(workbook, corpo, cab, planos.map(p => p.i));
@@ -307,14 +325,14 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     const linhasMes: number[] = [];
     for (let i = 0; i < nLinhas; i++) if (Number(a[i]) === ano && norm(m[i]) === alvo) linhasMes.push(i);
     if (!linhasMes.length) { r.erros.push("não há lançamentos para este mês"); return fim(); }
-    for (const i of linhasMes) {
-      if (finalizado(i)) continue;
-      definir(i, "Estado do Lançamento", "Finalizado");
-      definir(i, "Revisto", "Sim");
-      if (!vazio(meta["Data Ultima Alteracao"])) definir(i, "Data Ultima Alteracao", meta["Data Ultima Alteracao"] as number);
-      if (!vazio(meta["Utilizador Alteracao"])) definir(i, "Utilizador Alteracao", String(meta["Utilizador Alteracao"]));
-      r.alteradas++;
-    }
+    // Só os que ainda não estão Finalizados; cada coluna é escrita por blocos de linhas seguidas.
+    const mudar = linhasMes.filter(i => !finalizado(i));
+    const igual = (v: unknown) => new Map<number, unknown>(mudar.map(i => [i, v] as [number, unknown]));
+    escreverColuna("Estado do Lançamento", igual("Finalizado"));
+    escreverColuna("Revisto", igual("Sim"));
+    if (!vazio(meta["Data Ultima Alteracao"])) escreverColuna("Data Ultima Alteracao", igual(meta["Data Ultima Alteracao"]));
+    if (!vazio(meta["Utilizador Alteracao"])) escreverColuna("Utilizador Alteracao", igual(String(meta["Utilizador Alteracao"])));
+    r.alteradas = mudar.length;
     r.ok = true;
     return fim();
   }
@@ -474,6 +492,15 @@ function preencherEscaloes(workbook: ExcelScript.Workbook, corpo: ExcelScript.Ra
     for (const f of d.faixas) if (v >= f.inicio) r = f.escalao;
     return r;
   };
-  if (indices.length === ult - ini + 1) bloco.getColumn(j).setValues(valores.map(l => [escalao(l)]));
-  else for (const i of indices) bloco.getCell(i - ini, j).setValue(escalao(valores[i - ini]));
+  // Escrita por blocos de linhas seguidas (só as linhas indicadas).
+  const ord = indices.slice().sort((x, y) => x - y);
+  const fEsc = corpo.getWorksheet(), l0 = corpo.getRowIndex(), c0 = corpo.getColumnIndex();
+  for (let p = 0; p < ord.length;) {
+    let q = p;
+    while (q + 1 < ord.length && ord[q + 1] === ord[q] + 1) q++;
+    const linhasSeq: (string | number | boolean)[][] = [];
+    for (let k = p; k <= q; k++) linhasSeq.push([escalao(valores[ord[k] - ini])]);
+    fEsc.getRangeByIndexes(l0 + ord[p], c0 + j, q - p + 1, 1).setValues(linhasSeq);
+    p = q + 1;
+  }
 }
