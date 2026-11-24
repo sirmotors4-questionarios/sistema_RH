@@ -30,3 +30,26 @@ test('API usa envelope no ramo editar e exige confirmação v2',async()=>{
  assert.equal(r.alteradas,0);assert.equal(pedido.action,'lancamento_editar');assert.equal(pedido.linhas.length,1);assert.equal(pedido.linhas[0].__rh_operacao,'recalcular_pendentes');
  await assert.rejects(operarLancamentos('repor_inicial',{ano:2026,mes:4,Empresa:'A',Codigo:'1'},deps),/Office Script/);
 });
+import {prepararSincronizacao} from '../rh-pendentes.js';
+test('sincronização: retira Pendentes sem contrato, introduz em falta e preserva Alterados',()=>{
+ const tarde=c=>({...f(c),'Data Admissao':'2026-05-02'});
+ const r=prepararSincronizacao({ano:2026,mes:4,
+  lancamentos:[row('1','Pendente'),row('2','Pendente'),row('3','Alterado')],
+  funcionarios:[f('1'),tarde('2'),tarde('3'),f('5')]});
+ assert.deepEqual(r.retirar.map(x=>x.Codigo),['0002']);assert.match(r.retirar[0].motivo,/Admissão posterior/);
+ assert.deepEqual(r.aRever.map(x=>x.Codigo),['0003']);
+ assert.deepEqual(r.atualizacoes.map(l=>l.Codigo),['0001']);assert.deepEqual(r.erros,[]);
+ assert.deepEqual(r.introduzir.map(l=>l.Codigo),['0005']);assert.equal(r.introduzir[0]['Estado do Lançamento'],'Pendente');
+});
+test('sincronização não retira com cadastro ambíguo; introduz só quem tem dados completos',()=>{
+ const r=prepararSincronizacao({ano:2026,mes:4,lancamentos:[row('1','Pendente')],funcionarios:[f('1'),f('1'),f('7'),f('7'),f('8'),{...f('9'),'Vencimento Base':''}]});
+ assert.deepEqual(r.retirar,[]);assert.equal(r.erros.length,1);
+ assert.deepEqual(r.introduzir.map(l=>l.Codigo),['0008']);
+ assert.ok(r.avisosIntroducao.some(e=>/repetido/.test(e)));assert.ok(r.avisosIntroducao.some(e=>/0009/.test(e)));
+});
+test('API v3 exige a nova versão do script',async()=>{
+ const resp=l=>({getToken:async()=>'t',url:'https://example.test',fetchImpl:async(u,p)=>({ok:true,status:200,json:async()=>({ok:true,linha:JSON.stringify(l)})})});
+ await assert.rejects(operarLancamentos('retirar_pendentes',{ano:2026,mes:4,mesNome:'Abril',retirar:[{Empresa:'A',Codigo:'1'}]},resp({versao:2,operacao:'retirar_pendentes',linhas:[]})),/ainda não sabe/);
+ const r=await operarLancamentos('introduzir_lancamentos',{ano:2026,mes:4,mesNome:'Abril',linhas:[{Empresa:'A',Codigo:'1'}]},resp({versao:3,operacao:'introduzir_lancamentos',alteradas:1,linhas:[]}));
+ assert.equal(r.alteradas,1);
+});
