@@ -146,3 +146,32 @@ ou dias trabalhados. Vencimento, INSS, IRPS e líquido são calculados pelo Exce
 actualizados na linha após resposta do fluxo existente `lancamento_editar`.
 Lançamentos finalizados, colaborador ambíguo, período incorrecto e contrato sem vigência
 bloqueiam a alteração. Não requer uma nova acção do Power Automate.
+
+### Carregar Pendentes e voltar ao estado inicial (Office Script v2)
+
+- O clique em **Carregar mês** consulta dados recentes e recalcula somente lançamentos
+  cujo estado é **Pendente**. Continuam Pendentes. Alterados e Finalizados não são escritos.
+  A verificação de estado é repetida no Excel no momento de gravar.
+- A navegação, mudança de mês, relatórios e consultas de acompanhamento continuam apenas
+  a ler. O recálculo automático acontece no clique explícito em Carregar mês, com perfil
+  autorizado e URL de gravação configurado. Um bloqueio na preparação impede o lote.
+- **Voltar ao estado inicial**, dentro do lançamento, pede confirmação e repõe as entradas
+  e condições guardadas antes da alteração, incluindo alterações já gravadas. O estado
+  volta a Pendente, Revisto a Não, e as fórmulas são recalculadas. Finalizados não podem ser repostos.
+- A referência fica no próprio workbook, na tabela `tbl_lancamentos_iniciais_RH`, criada
+  automaticamente. Um carregamento de Pendentes actualiza essa referência; a primeira edição
+  de um Pendente também a captura. Edições seguintes de um Alterado não a substituem.
+  Os valores da referência não dependem do browser nem se perdem ao fechar a sessão.
+- Alterados anteriores à instalação, sem referência, não podem ser repostos: não há histórico
+  suficiente para reconstruir os valores. Não se inventa uma referência a partir da linha já alterada.
+- Reposição restaura entradas, não fórmulas antigas: os totais são calculados pelas fórmulas
+  actualmente instaladas no Excel. Mantêm-se as regras 21–20 e de regimes existentes.
+
+**Instalação necessária antes de integrar a interface:** substituir o conteúdo do Office Script
+`LancamentoNovoMes` usado pelo `RH_API_Actualizar` pela versão em
+`office-scripts/LancamentoNovoMes.ts`. Ver instruções em `office-scripts/README.md`.
+A alteração no GitHub não actualiza automaticamente o script guardado na Microsoft.
+
+Verificação local: Node.js 22.13+ (ou 24) e `node --test tests/*.test.mjs`.
+O teste do Office Script usa a implementação real com tabelas simuladas; não substitui o
+ensaio numa cópia do workbook e a verificação do fluxo autenticado.

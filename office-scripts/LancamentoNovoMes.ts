@@ -58,6 +58,43 @@ function valorCelula(coluna: string, v: unknown): string | number | boolean {
   return v as string | number | boolean;
 }
 
+// Referências persistentes: nunca guardadas no navegador nem reconstruídas a partir de Alterados.
+const TABELA_INICIAIS = "tbl_lancamentos_iniciais_RH";
+const CONDICOES = ["RegimePagamento", "Valor Unitário", "Data Inicio Contrato", "Data Fim Contrato", "Dias Trabalhados"];
+const AUDITORIA = ["Data Ultima Alteracao", "Utilizador Alteracao"];
+const CAMPOS_INICIAIS = EDITAVEIS.filter(c => AUDITORIA.indexOf(c) < 0);
+interface ReferenciaInicial { chave: string; valores: Record<string, string | number | boolean>; formulas?: Record<string, string>; }
+function tabelaIniciais(workbook: ExcelScript.Workbook): ExcelScript.Table {
+  const existente = workbook.getTable(TABELA_INICIAIS);
+  if (existente) return existente;
+  // addWorksheet sem nome evita colidir com folhas existentes do utilizador.
+  const folha = workbook.addWorksheet();
+  const cab = folha.getRange("A1:C1");
+  cab.setValues([["Chave", "Referencia_JSON", "Guardado_Em"]]);
+  const t = folha.addTable(cab, true);
+  t.setName(TABELA_INICIAIS);
+  return t;
+}
+function referenciasIniciais(workbook: ExcelScript.Workbook): Map<string, {indice: number; json: string}> {
+  const t = workbook.getTable(TABELA_INICIAIS), mapa = new Map<string, {indice: number; json: string}>();
+  if (!t || !t.getRowCount()) return mapa;
+  const cab = t.getHeaderRowRange().getValues()[0].map(v => String(v));
+  if (cab.join("|") !== "Chave|Referencia_JSON|Guardado_Em") throw Error("Estrutura inválida em " + TABELA_INICIAIS);
+  t.getRangeBetweenHeaderAndTotal().getValues().forEach((l, i) => {
+    const k = String(l[0]);
+    if (mapa.has(k)) throw Error("Referência inicial duplicada: " + k);
+    mapa.set(k, {indice: i, json: String(l[1])});
+  });
+  return mapa;
+}
+function guardarInicial(t: ExcelScript.Table, referencias: Map<string, {indice: number; json: string}>, ref: ReferenciaInicial): void {
+  const json = JSON.stringify(ref), existente = referencias.get(ref.chave);
+  if (json.length > 32000) throw Error("Referência inicial demasiado longa: " + ref.chave);
+  const valores = [[ref.chave, json, new Date().toISOString()]];
+  if (existente) t.getRangeBetweenHeaderAndTotal().getRow(existente.indice).setValues(valores);
+  else { t.addRows(-1, valores); referencias.set(ref.chave, {indice: t.getRowCount() - 1, json}); }
+}
+
 function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: string, modo: string): Resultado {
   const t0 = Date.now();
   const modos = ["validar", "gravar", "editar", "finalizar"];
@@ -100,6 +137,96 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     if (idx(nome) >= 0) corpo.getCell(i, idx(nome)).setValue(valorCelula(nome, v));
   };
 
+  const objectoLinha = (i: number): Record<string, string | number | boolean> => {
+    const valores = corpo.getRow(i).getValues()[0], obj: Record<string, string | number | boolean> = {};
+    cab.forEach((h, j) => { obj[h] = valores[j]; });
+    return obj;
+  };
+  const referencia = (i: number, patch: Record<string, unknown> = {}): ReferenciaInicial => {
+    const linha = objectoLinha(i), valores: Record<string, string | number | boolean> = {};
+    for (const h of CAMPOS_INICIAIS) if (idx(h) >= 0) valores[h] = Object.prototype.hasOwnProperty.call(patch, h) ? valorCelula(h, patch[h]) : linha[h];
+    const formulas: Record<string, string> = {}, originais = corpo.getRow(i).getFormulasR1C1()[0];
+    for (const h of CAMPOS_INICIAIS) if (idx(h) >= 0 && !Object.prototype.hasOwnProperty.call(patch, h) && String(originais[idx(h)]).startsWith("=")) formulas[h] = String(originais[idx(h)]);
+    return {chave: chave(linha.Empresa, linha.Codigo, ano, mes), valores, formulas};
+  };
+  // Um envelope é transportado pela acção já existente lancamento_editar.
+  // Scripts antigos rejeitam-no sem escrever (coluna desconhecida/chave ausente).
+  const envelope = pedido[0] ?? {};
+  const operacao = String(envelope["__rh_operacao"] ?? "");
+  if (r.modo === "editar" && operacao) {
+    if (pedido.length !== 1 || ["recalcular_pendentes", "repor_inicial"].indexOf(operacao) < 0) { r.erros.push("operação inválida"); return fim(); }
+    if (idx("Estado do Lançamento") < 0) { r.erros.push("coluna Estado do Lançamento em falta"); return fim(); }
+    const referencias = referenciasIniciais(workbook);
+    const planos: {i: number; patch: Record<string, unknown>; ref?: ReferenciaInicial; formulas?: Record<string, string>}[] = [];
+    let ignoradas = 0;
+    if (operacao === "recalcular_pendentes") {
+      const atualizacoes = envelope["atualizacoes"] as Record<string, unknown>[];
+      if (!Array.isArray(atualizacoes) || !atualizacoes.length || atualizacoes.length > LIMITE_LINHAS) { r.erros.push("lista de actualizações inválida"); return fim(); }
+      const vistos = new Set<string>();
+      for (const patch of atualizacoes) {
+        if (!patch || typeof patch !== "object" || Array.isArray(patch)) { r.erros.push("actualização inválida"); continue; }
+        const k = chave(patch.Empresa, patch.Codigo, ano, mes), ids = linhasPorChave.get(k) ?? [];
+        if (vistos.has(k) || ids.length !== 1) { r.erros.push("lançamento inexistente ou duplicado: " + k); continue; }
+        vistos.add(k);
+        const i = ids[0];
+        // Revalidar o estado no Excel, mesmo que o browser tenha lido Pendente antes.
+        if (norm(estadoCol[i]) !== "PENDENTE") { ignoradas++; continue; }
+        for (const h of Object.keys(patch)) {
+          if (["Empresa", "Codigo"].indexOf(h) >= 0) continue;
+          if (CONDICOES.indexOf(h) < 0 && AUDITORIA.indexOf(h) < 0) r.erros.push("campo proibido no recálculo: " + h);
+          else if (idx(h) < 0) r.erros.push("coluna desconhecida: " + h);
+        }
+        const valor = Number(patch["Valor Unitário"]), dias = patch["Dias Trabalhados"];
+        if (!isFinite(valor) || valor <= 0 || ["MENSAL", "HORA", "DIÁRIO", "DIARIO"].indexOf(norm(patch.RegimePagamento)) < 0)
+          r.erros.push("condições inválidas: " + k);
+        if (norm(patch.RegimePagamento) === "MENSAL" && (vazio(dias) || !isFinite(Number(dias)) || Number(dias) < 0 || Number(dias) > 30))
+          r.erros.push("dias inválidos: " + k);
+        const ref = referencia(i, patch);
+        if (JSON.stringify(ref).length > 32000) r.erros.push("referência inicial demasiado longa: " + k);
+        planos.push({i, patch, ref});
+      }
+    } else {
+      const k = chave(envelope.Empresa, envelope.Codigo, ano, mes), ids = linhasPorChave.get(k) ?? [];
+      if (ids.length !== 1) { r.erros.push("lançamento inexistente ou duplicado: " + k); return fim(); }
+      const i = ids[0];
+      if (finalizado(i)) { r.erros.push("este lançamento está Finalizado e não pode ser reposto"); return fim(); }
+      const guardada = referencias.get(k);
+      if (!guardada) { r.erros.push("Não existe referência inicial guardada para este lançamento. Alterações antigas não podem ser reconstruídas."); return fim(); }
+      let ref: ReferenciaInicial;
+      try { ref = JSON.parse(guardada.json) as ReferenciaInicial; } catch { r.erros.push("referência inicial inválida"); return fim(); }
+      if (ref.chave !== k || !ref.valores || typeof ref.valores !== "object" || Array.isArray(ref.valores)) { r.erros.push("referência inicial inválida"); return fim(); }
+      const patch: Record<string, unknown> = {};
+      for (const h of Object.keys(ref.valores)) {
+        if (CAMPOS_INICIAIS.indexOf(h) < 0 || idx(h) < 0) r.erros.push("coluna inválida na referência: " + h);
+        else patch[h] = ref.valores[h];
+      }
+      for (const h of CAMPOS_INICIAIS) if (idx(h) >= 0 && !Object.prototype.hasOwnProperty.call(ref.valores, h)) r.erros.push("referência incompleta: " + h);
+      for (const h of AUDITORIA) if (idx(h) >= 0) patch[h] = envelope[h] ?? "";
+      const formulas = ref.formulas ?? {};
+      for (const h of Object.keys(formulas)) {
+        if (CAMPOS_INICIAIS.indexOf(h) < 0 || idx(h) < 0 || typeof formulas[h] !== "string" || !formulas[h].startsWith("=")) r.erros.push("fórmula inválida na referência: " + h);
+      }
+      planos.push({i, patch, formulas});
+    }
+    if (r.erros.length) return fim();
+    // Guardar a referência antes de qualquer alteração salarial. Recalcular mantém Pendente.
+    if (planos.some(p => Boolean(p.ref))) {
+      const t = tabelaIniciais(workbook);
+      for (const p of planos) if (p.ref) guardarInicial(t, referencias, p.ref);
+    }
+    for (const p of planos) {
+      for (const h of Object.keys(p.patch)) if (CHAVE.indexOf(h) < 0 && !p.formulas?.[h]) definir(p.i, h, p.patch[h]);
+      for (const h of Object.keys(p.formulas ?? {})) corpo.getCell(p.i, idx(h)).setFormulaR1C1(p.formulas[h]);
+      if (operacao === "repor_inicial") { definir(p.i, "Estado do Lançamento", "Pendente"); definir(p.i, "Revisto", "Não"); }
+    }
+    workbook.getApplication().calculate(ExcelScript.CalculationType.full);
+    for (const p of planos) preencherEscaloes(workbook, corpo, cab, p.i, 1);
+    r.alteradas = planos.length;
+    r.linha = JSON.stringify({versao: 2, operacao, alteradas: planos.length, ignoradas, linhas: operacao === "repor_inicial" ? planos.map(p => objectoLinha(p.i)) : []});
+    r.ok = true;
+    return fim();
+  }
+
   if (r.modo === "finalizar") {
     const alvo = norm(mes);
     const meta = pedido[0] ?? {};
@@ -134,11 +261,18 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
       else if (idx(p) < 0) r.erros.push(`coluna desconhecida: ${p}`);
     }
     if (r.erros.length) return fim();
+    // Captura apenas Pendentes: não inventa uma origem para lançamentos já Alterados.
+    if (norm(estadoCol[i]) === "PENDENTE") {
+      const ref = referencia(i);
+      if (JSON.stringify(ref).length > 32000) { r.erros.push("referência inicial demasiado longa"); return fim(); }
+      guardarInicial(tabelaIniciais(workbook), referenciasIniciais(workbook), ref);
+    }
     for (const p of campos) {
       const v = o[p];
       definir(i, p, v);
     }
     definir(i, "Estado do Lançamento", "Alterado");
+    workbook.getApplication().calculate(ExcelScript.CalculationType.full);
     preencherEscaloes(workbook, corpo, cab, i, 1);
     // Devolve a linha já recalculada (Vencimento, INSS, IRPS, Líquido…) para o site actualizar só esta linha.
     const valores = corpo.getRow(i).getValues()[0];
