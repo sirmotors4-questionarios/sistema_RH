@@ -1,5 +1,13 @@
 # Office Scripts — lançamentos salariais
 
+## Desempenho
+
+O Power Automate dá 120 s a cada execução do script. Cada leitura ao Excel é uma ida ao servidor (as escritas
+seguem em lote), por isso o script não faz leituras por colaborador: as linhas do mês são lidas num só bloco,
+os escalões são calculados de uma vez, o livro é recalculado uma única vez e linhas seguidas são apagadas num só
+pedido. O teste `recalcular 200 Pendentes faz um número fixo de leituras` garante que isto se mantém
+(versão anterior: ~4 leituras por Pendente, 805 para 200; actual: 9, independentemente do número).
+
 ## Activar retirar/introduzir no «Carregar mês» (v3) — OBRIGATÓRIO antes de usar
 
 1. No Excel/Microsoft 365, abra o script **LancamentoNovoMes** usado pelo fluxo **RH_API_Actualizar**,
