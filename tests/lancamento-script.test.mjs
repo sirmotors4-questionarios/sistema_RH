@@ -150,14 +150,12 @@ test('recalcular 200 Pendentes escreve por colunas',()=>{
 });
 
 // ---------- v4: marcar Retirado (Alterados/Finalizados sem contrato no período) ----------
-test('marcar_retirados marca Alterado/Finalizado como Retirado, guarda o motivo e não apaga',()=>{
- const w=workbook([obj('1'),obj('2','Alterado'),obj('3','Finalizado'),obj('4','Retirado')]);
- const r=run(w,[{__rh_operacao:'marcar_retirados','Utilizador Alteracao':'teste','Data Ultima Alteracao':46300,
-  retirar:['1','2','3','4'].map(c=>({Empresa:'A',Codigo:c,motivo:'Admissão posterior ao fim do período 21–20.'}))}]);
- assert.equal(r.ok,true);assert.equal(r.alteradas,2);const l=JSON.parse(r.linha);assert.equal(l.versao,4);assert.equal(l.ignoradas,2);
- assert.equal(w.main.rows.length,4);
- assert.equal(w.read(0)['Estado do Lançamento'],'Pendente');
- for(const i of [1,2]){assert.equal(w.read(i)['Estado do Lançamento'],'Retirado');assert.equal(w.read(i)['Observações'],'Inicial | Retirado: Admissão posterior ao fim do período 21–20.');assert.equal(w.read(i)['Utilizador Alteracao'],'teste');}
+test('retirar_sem_contrato apaga Alterados/Finalizados/Retirados indicados, nunca Pendentes',()=>{
+ const w=workbook([obj('1'),obj('2','Alterado'),obj('3','Finalizado'),obj('4','Retirado'),obj('5')]);
+ w.main.deleteRowsAt=(i,n=1)=>w.main.rows.splice(i,n);w.main.getAutoFilter=()=>null;
+ const r=run(w,[{__rh_operacao:'retirar_sem_contrato',retirar:['1','2','3','4'].map(c=>({Empresa:'A',Codigo:c}))}]);
+ assert.equal(r.ok,true);assert.equal(r.alteradas,3);const l=JSON.parse(r.linha);assert.equal(l.versao,4);assert.equal(l.ignoradas,1);
+ assert.deepEqual(w.main.rows.map(x=>x[1]),['1','5']);
 });
 test('Retirado não pode ser editado nem é finalizado',()=>{
  const w=workbook([obj('1','Retirado'),obj('2')]);

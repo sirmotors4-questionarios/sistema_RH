@@ -37,7 +37,7 @@ test('sincronização: retira Pendentes sem contrato, introduz em falta e preser
   lancamentos:[row('1','Pendente'),row('2','Pendente'),row('3','Alterado'),row('4','Retirado')],
   funcionarios:[f('1'),tarde('2'),tarde('3'),tarde('4'),f('5')]});
  assert.deepEqual(r.retirar.map(x=>x.Codigo),['0002']);assert.match(r.retirar[0].motivo,/Admissão posterior/);
- assert.deepEqual(r.aRever.map(x=>x.Codigo),['0003']);
+ assert.deepEqual(r.aRever.map(x=>x.Codigo),['0003','0004']);
  assert.deepEqual(r.atualizacoes.map(l=>l.Codigo),['0001']);assert.deepEqual(r.erros,[]);
  assert.deepEqual(r.introduzir.map(l=>l.Codigo),['0005']);assert.equal(r.introduzir[0]['Estado do Lançamento'],'Pendente');
 });

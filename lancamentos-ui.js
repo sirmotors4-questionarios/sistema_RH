@@ -403,8 +403,8 @@ export function iniciarLancamentos(ctx) {
       if (introduzir.length) bloco.push(el("h3", {text: "A introduzir (" + introduzir.length + ")"}),
         el("p", {class: "help", text: "Colaboradores com contrato vigente no período que ainda não têm lançamento. Entram como Pendentes, com as regras do Novo mês."}),
         tabela(["Empresa", "Código", "Nome", "Regime", "Origem"], introduzir.map(l => [l.Empresa, l.Codigo, l.Nome, l.RegimePagamento, l.Origem_Lancamento])));
-      if (aRever.length) bloco.push(el("h3", {text: "A marcar como Retirado (" + aRever.length + ")"}),
-        el("p", {class: "muted", text: "Lançamentos Alterados/Finalizados sem contrato neste período. Não são apagados: ficam no Excel com o estado «Retirado» e o motivo nas Observações, e deixam de contar na folha, nos totais e nos relatórios."}),
+      if (aRever.length) bloco.push(el("h3", {text: "A retirar — Alterados/Finalizados (" + aRever.length + ")"}),
+        el("p", {class: "muted", text: "Lançamentos já Alterados ou Finalizados sem contrato neste período. As linhas são apagadas do mês, com as alterações feitas nelas."}),
         tabela(["Empresa", "Código", "Nome", "Estado actual", "Motivo"], aRever.map(x => [x.Empresa, x.Codigo, x.nome, x.estado, x.motivo])));
       $("rel-body").replaceChildren(...bloco);
       accoes([

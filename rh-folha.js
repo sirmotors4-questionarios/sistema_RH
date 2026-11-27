@@ -162,8 +162,7 @@ export const CAMPOS_EDITAVEIS = [
   {k: "Empréstimos", tipo: "numero", grupo: "desconto"}, {k: "Outros Descontos", tipo: "numero", grupo: "desconto"}, {k: "Observações", tipo: "texto"}];
 const decimal = v => { const t = texto(v).replace(/\s/g, ""); if (!t) return 0; const x = Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t); return Number.isFinite(x) ? x : NaN; };
 export const lancamentoFinalizado = l => igual(campo(l, "Estado do Lançamento"), "Finalizado");
-// Retirado: lançamento sem contrato no período que já estava Alterado/Finalizado. Fica no Excel (histórico),
-// mas não conta para folha, totais, relatórios nem painel.
+// Retirado: estado da versão anterior (linhas sem contrato no período); o Carregar mês apaga-as. Até lá, não contam.
 export const lancamentoRetirado = l => igual(campo(l, "Estado do Lançamento"), "Retirado");
 export const semRetirados = linhas => linhas.filter(l => !lancamentoRetirado(l));
 

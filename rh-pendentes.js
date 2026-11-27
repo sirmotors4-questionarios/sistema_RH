@@ -29,8 +29,8 @@ export function prepararPendentes({lancamentos, funcionarios, adendas, parametro
 
 // Sincronização do mês ao carregar: retira os Pendentes sem contrato no período, recalcula os restantes
 // Pendentes e introduz os colaboradores com contrato vigente que ainda não têm lançamento no mês.
-// Alterados e Finalizados sem contrato no período não são apagados nem recalculados: são marcados «Retirado»
-// (ficam no Excel como histórico, fora da folha e dos totais) — lista `aRever` (nome mantido por compatibilidade).
+// Alterados e Finalizados sem contrato no período (e linhas «Retirado» da versão anterior) vão para `aRever`:
+// são mostrados à parte e apagados do mês depois de confirmados (nunca recalculados).
 export function prepararSincronizacao({lancamentos, lancamentosAnterior = [], funcionarios, adendas = [], parametros = [], ano, mes, utilizador = "", agora}) {
   const per = periodoFolha(Number(ano), Number(mes));
   const porChave = new Map();
@@ -45,12 +45,12 @@ export function prepararSincronizacao({lancamentos, lancamentosAnterior = [], fu
     const k = chaveRH(campo(l, 'Empresa'), campo(l, 'Codigo')), fs = porChave.get(k) || [];
     // Só se retira quando o cadastro é inequívoco e diz que não há contrato no período.
     const c = contagem.get(k) === 1 && fs.length === 1 ? contratoNoPeriodo(fs[0], adendas, per) : null;
-    if (String(campo(l, 'Estado do Lançamento')).trim().toUpperCase() === 'RETIRADO') continue; // já retirado
-    if (!c || c.vigente) { ficam.push(l); continue; }
+    const jaRetirado = String(campo(l, 'Estado do Lançamento')).trim().toUpperCase() === 'RETIRADO';
+    if (!jaRetirado && (!c || c.vigente)) { ficam.push(l); continue; }
     const pendente = String(campo(l, 'Estado do Lançamento')).trim().toUpperCase() === 'PENDENTE';
     const item = {Empresa: String(campo(l, 'Empresa')).trim(), Codigo: normalizarCodigo(campo(l, 'Codigo')), chave: k,
-      nome: String(campo(l, 'Nome')).trim(), estado: String(campo(l, 'Estado do Lançamento')).trim(), motivo: c.motivo};
-    if (pendente) retirar.push(item); else { aRever.push(item); ficam.push(l); }
+      nome: String(campo(l, 'Nome')).trim(), estado: String(campo(l, 'Estado do Lançamento')).trim(), motivo: c?.motivo || 'Marcado como Retirado'};
+    if (pendente) retirar.push(item); else aRever.push(item);
   }
   const recalculo = prepararPendentes({lancamentos: ficam, funcionarios, adendas, parametros, ano, mes, utilizador});
   // Colaboradores a introduzir: as mesmas regras do Novo mês, só para quem não tem lançamento no mês.
