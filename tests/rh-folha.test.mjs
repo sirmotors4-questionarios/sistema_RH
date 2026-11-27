@@ -252,3 +252,13 @@ test('recálculo Hora e Diário actualiza tarifa sem inventar presença', () => 
     assert.ok(!('Dias Trabalhados' in r.linha));
   }
 });
+
+import {linhasFolha as _lf, semRetirados as _sr} from '../rh-folha.js';
+import test2 from 'node:test';
+import assert2 from 'node:assert/strict';
+test2('lançamentos Retirados ficam fora da folha e dos totais',()=>{
+ const l=(c,e)=>({Empresa:'A',Codigo:c,Ano:2026,'Mês':'Abril','Estado do Lançamento':e,'Vencimento Base':1000,'Salario Liquido':900});
+ const rows=[l('1','Finalizado'),l('2','Retirado'),l('3','Alterado')];
+ assert2.deepEqual(_lf(rows,2026,4).map(x=>x.codigo),['0001','0003']);
+ assert2.equal(_sr(rows).length,2);
+});

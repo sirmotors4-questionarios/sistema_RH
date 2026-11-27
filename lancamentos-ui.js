@@ -272,7 +272,7 @@ export function iniciarLancamentos(ctx) {
     const v = k => M.campo(original, k);
     const regime = String(v("RegimePagamento") || "");
     const hora = /^hora$/i.test(regime.trim());
-    const fechado = F.lancamentoFinalizado(original), pode = ctx.podeGravar();
+    const fechado = F.lancamentoFinalizado(original) || F.lancamentoRetirado(original), pode = ctx.podeGravar();
     const t = abrir({eyebrow: "LANÇAMENTO · " + M.NOME_MES[mes - 1].toUpperCase() + " " + ano, titulo: M.normalizarCodigo(v("Codigo")) + " · " + (v("Nome") || ""),
       sub: [v("Empresa"), v("Departamento"), regime, v("Estado do Lançamento") || "—"].filter(Boolean).join("  ·  ")});
     const num = x => { const n = M.numero(x); return n == null ? "—" : fmt(n); };
@@ -370,7 +370,7 @@ export function iniciarLancamentos(ctx) {
     const {ano, mes} = ctx.periodo();
     const nome = M.NOME_MES[mes - 1] + "/" + ano;
     const linhas = ctx.lancamentosMes();
-    const abertas = linhas.filter(l => !F.lancamentoFinalizado(l)).length;
+    const abertas = linhas.filter(l => !F.lancamentoFinalizado(l) && !F.lancamentoRetirado(l)).length;
     abrir({eyebrow: "FINALIZAR MÊS", titulo: "Finalizar " + nome, sub: linhas.length + " lançamento(s) · " + abertas + " por finalizar"});
     $("rel-body").replaceChildren(
       el("p", {text: abertas ? "Todos os lançamentos de " + nome + " passam a «Finalizado» e «Revisto = Sim». Depois de finalizados ficam apenas para consulta." : "Este período já está Finalizado."}),
@@ -403,8 +403,9 @@ export function iniciarLancamentos(ctx) {
       if (introduzir.length) bloco.push(el("h3", {text: "A introduzir (" + introduzir.length + ")"}),
         el("p", {class: "help", text: "Colaboradores com contrato vigente no período que ainda não têm lançamento. Entram como Pendentes, com as regras do Novo mês."}),
         tabela(["Empresa", "Código", "Nome", "Regime", "Origem"], introduzir.map(l => [l.Empresa, l.Codigo, l.Nome, l.RegimePagamento, l.Origem_Lancamento])));
-      if (aRever.length) bloco.push(el("div", {class: "notice-inline"},
-        el("p", {text: aRever.length + " lançamento(s) Alterado(s)/Finalizado(s) sem contrato no período não são mexidos; reveja-os: " + aRever.map(x => x.chave + " (" + x.motivo + ")").join("; ")})));
+      if (aRever.length) bloco.push(el("h3", {text: "A marcar como Retirado (" + aRever.length + ")"}),
+        el("p", {class: "muted", text: "Lançamentos Alterados/Finalizados sem contrato neste período. Não são apagados: ficam no Excel com o estado «Retirado» e o motivo nas Observações, e deixam de contar na folha, nos totais e nos relatórios."}),
+        tabela(["Empresa", "Código", "Nome", "Estado actual", "Motivo"], aRever.map(x => [x.Empresa, x.Codigo, x.nome, x.estado, x.motivo])));
       $("rel-body").replaceChildren(...bloco);
       accoes([
         {texto: "Aplicar alterações", classe: "primary", click: () => decidir("aplicar")},
