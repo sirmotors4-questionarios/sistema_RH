@@ -12,7 +12,7 @@ import * as M from "./rh-modulos.js";
 import {criarFicha} from "./ficha.js";
 import {iniciarLancamentos} from "./lancamentos-ui.js";
 import {prepararSincronizacao, recalcularEmLotes} from "./rh-pendentes.js";
-import {unirAdendas} from "./rh-folha.js";
+import {unirAdendas, semRetirados} from "./rh-folha.js";
 "use strict";
 
 // Sem sessão Microsoft: dados fictícios. Com sessão: dados do Excel via RH_API_Consultar (só leitura).
@@ -516,17 +516,23 @@ $("load-month").addEventListener("click",async()=>{
   // Mês sem lançamentos: a criação completa é feita no «Novo mês», com a verificação própria.
   if(!doMes.length)r.introduzir=[];
   let retirar=r.retirar,introduzir=r.introduzir,escolhaFeita="aplicar";
-  if(retirar.length||introduzir.length){
-   progresso.actualizar(2,"A aguardar a sua confirmação: "+retirar.length+" a retirar, "+introduzir.length+" a introduzir…");
+  let marcar=r.aRever;
+  if(retirar.length||introduzir.length||marcar.length){
+   progresso.actualizar(2,"A aguardar a sua confirmação: "+(retirar.length+marcar.length)+" a retirar, "+introduzir.length+" a introduzir…");
    const escolha=await lanc.confirmarSincronizacao({ano,mes,retirar,introduzir,aRever:r.aRever,recalcular:r.atualizacoes.length});
    if(!escolha){progresso.falhar("Cancelado: nada foi gravado.");showToast("Carregar mês cancelado. Nada foi gravado.");return}
-   escolhaFeita=escolha;if(escolha==="recalcular"){retirar=[];introduzir=[]}
+   escolhaFeita=escolha;if(escolha==="recalcular"){retirar=[];introduzir=[];marcar=[]}
   }
   const transp={credenciais:sessao,url:urlGravacao()},nomeMes=M.NOME_MES[mes-1],partes=[],avisos=[];
   if(retirar.length){
    progresso.actualizar(3,"A retirar "+retirar.length+" lançamento(s) sem contrato no período…");
    const x=await operarLancamentos("retirar_pendentes",{ano,mes,mesNome:nomeMes,retirar:retirar.map(({Empresa,Codigo})=>({Empresa,Codigo}))},transp);
    partes.push(x.alteradas+" retirado(s)");if(x.ignoradas)avisos.push(x.ignoradas+" não retirado(s) porque já não estavam Pendentes.");
+  }
+  if(marcar.length){
+   progresso.actualizar(3,"A marcar "+marcar.length+" lançamento(s) Alterado(s)/Finalizado(s) como Retirado…");
+   const x=await operarLancamentos("marcar_retirados",{ano,mes,mesNome:nomeMes,utilizador:sessao.email,retirar:marcar.map(({Empresa,Codigo,motivo})=>({Empresa,Codigo,motivo}))},transp);
+   partes.push(x.alteradas+" marcado(s) como Retirado");if(x.ignoradas)avisos.push(x.ignoradas+" não marcado(s): o estado no Excel já não era Alterado/Finalizado.");
   }
   let falhasRecalculo=[];
   if(r.atualizacoes.length){
@@ -546,14 +552,13 @@ $("load-month").addEventListener("click",async()=>{
   }
   if(falhasRecalculo.length)avisos.push(falhasRecalculo.length+" Pendente(s) com erro no Excel, não recalculado(s): "+falhasRecalculo.slice(0,5).map(f=>f.chave).join(", ")+(falhasRecalculo.length>5?" e mais "+(falhasRecalculo.length-5):"")+". Motivo: "+falhasRecalculo[0].motivo);
   if(r.erros.length)avisos.push(r.erros.length+" Pendente(s) não actualizado(s), reveja: "+r.erros.slice(0,3).join(" ")+(r.erros.length>3?" E mais "+(r.erros.length-3)+".":""));
-  if(r.aRever.length)avisos.push(r.aRever.length+" Alterado(s)/Finalizado(s) sem contrato no período: "+r.aRever.map(x=>x.chave).join(", ")+".");
   if(r.avisosIntroducao.length&&doMes.length&&escolhaFeita!=="recalcular")avisos.push("Não introduzido(s): "+r.avisosIntroducao.slice(0,3).join(" ")+(r.avisosIntroducao.length>3?" E mais "+(r.avisosIntroducao.length-3)+".":""));
   if(partes.length){
    progresso.actualizar(6,"Gravado. A actualizar os dados apresentados…");
    meses.delete(ano+"-"+mes);mesesCompletos=false;
    await carregarLancamentos({ano,mes});
   }
-  const fim=(partes.length?partes.join(" · ")+". Alterados e Finalizados preservados.":"Mês carregado; não havia nada a actualizar.")+(avisos.length?" "+avisos.join(" "):"");
+  const fim=(partes.length?partes.join(" · ")+".":"Mês carregado; não havia nada a actualizar.")+(avisos.length?" "+avisos.join(" "):"");
   progresso.concluir(fim);if(avisos.length)progresso.falhar(fim); // 100% com destaque: há lançamentos a rever
   showToast(fim);
  })}catch(e){progresso?.falhar(e.message);setSource("lancamentos",e.message);showToast(e.message)}
@@ -829,7 +834,8 @@ const painel=iniciarPainel({
 const relatorios=iniciarRelatorios({
  ligado:()=>ligado,
  funcionarios:()=>carregar("funcionarios").then(()=>linhas("funcionarios","tbl_funcionarios")),
- carregarMes:(ano,mes)=>carregarMes(ano,mes),
+ // Relatórios sem os lançamentos Retirados (sem contrato no período).
+ carregarMes:(ano,mes)=>carregarMes(ano,mes).then(semRetirados),
  periodoMaisRecente:()=>carregar("lancamentos").then(d=>d?.periodo||null).catch(()=>null),
  utilizador:()=>utilizadorActual?.nome||sessaoAcesso()?.email||"",
  indemnizacoes:()=>lerIndemnizacoes(true),

@@ -32,7 +32,7 @@ export const linhasIndemnizacoes = so(COLUNAS_IND);
 export const linhasPrestacoes = so(COLUNAS_PRE);
 
 export function linhasLancamentos(rows) {
-  return rows.map(l => Object.fromEntries(COLUNAS_LANCAMENTOS.map(k => [k, M.campo(l, k, ...(ALT_LANC[k] || []))])));
+  return rows.filter(l => String(M.campo(l, "Estado do Lançamento")).trim().toUpperCase() !== "RETIRADO").map(l => Object.fromEntries(COLUNAS_LANCAMENTOS.map(k => [k, M.campo(l, k, ...(ALT_LANC[k] || []))])));
 }
 
 // Últimos n meses terminando em {ano, mes} (inclusive), do mais antigo para o mais recente.

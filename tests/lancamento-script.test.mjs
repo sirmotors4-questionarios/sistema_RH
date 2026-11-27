@@ -148,3 +148,20 @@ test('recalcular 200 Pendentes escreve por colunas',()=>{
  const r=batch(w,Array.from({length:200},(_,i)=>String(i+1)));assert.equal(r.ok,true);
  assert.ok(w.escritas-antes<=12,'escritas: '+(w.escritas-antes));assert.equal(w.read(199)['Dias Trabalhados'],10);assert.equal(w.read(199)['Valor Unitário'],18000);
 });
+
+// ---------- v4: marcar Retirado (Alterados/Finalizados sem contrato no período) ----------
+test('marcar_retirados marca Alterado/Finalizado como Retirado, guarda o motivo e não apaga',()=>{
+ const w=workbook([obj('1'),obj('2','Alterado'),obj('3','Finalizado'),obj('4','Retirado')]);
+ const r=run(w,[{__rh_operacao:'marcar_retirados','Utilizador Alteracao':'teste','Data Ultima Alteracao':46300,
+  retirar:['1','2','3','4'].map(c=>({Empresa:'A',Codigo:c,motivo:'Admissão posterior ao fim do período 21–20.'}))}]);
+ assert.equal(r.ok,true);assert.equal(r.alteradas,2);const l=JSON.parse(r.linha);assert.equal(l.versao,4);assert.equal(l.ignoradas,2);
+ assert.equal(w.main.rows.length,4);
+ assert.equal(w.read(0)['Estado do Lançamento'],'Pendente');
+ for(const i of [1,2]){assert.equal(w.read(i)['Estado do Lançamento'],'Retirado');assert.equal(w.read(i)['Observações'],'Inicial | Retirado: Admissão posterior ao fim do período 21–20.');assert.equal(w.read(i)['Utilizador Alteracao'],'teste');}
+});
+test('Retirado não pode ser editado nem é finalizado',()=>{
+ const w=workbook([obj('1','Retirado'),obj('2')]);
+ assert.match(run(w,[{Empresa:'A',Codigo:'1','Subsídios':1}]).erros.join(),/Retirado/);
+ const r=JSON.parse(JSON.stringify(ctx.main(w,2026,'Abril',JSON.stringify([{}]),'finalizar')));
+ assert.equal(r.alteradas,1);assert.equal(w.read(0)['Estado do Lançamento'],'Retirado');assert.equal(w.read(1)['Estado do Lançamento'],'Finalizado');
+});

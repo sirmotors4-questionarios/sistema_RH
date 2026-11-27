@@ -162,12 +162,17 @@ export const CAMPOS_EDITAVEIS = [
   {k: "Empréstimos", tipo: "numero", grupo: "desconto"}, {k: "Outros Descontos", tipo: "numero", grupo: "desconto"}, {k: "Observações", tipo: "texto"}];
 const decimal = v => { const t = texto(v).replace(/\s/g, ""); if (!t) return 0; const x = Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t); return Number.isFinite(x) ? x : NaN; };
 export const lancamentoFinalizado = l => igual(campo(l, "Estado do Lançamento"), "Finalizado");
+// Retirado: lançamento sem contrato no período que já estava Alterado/Finalizado. Fica no Excel (histórico),
+// mas não conta para folha, totais, relatórios nem painel.
+export const lancamentoRetirado = l => igual(campo(l, "Estado do Lançamento"), "Retirado");
+export const semRetirados = linhas => linhas.filter(l => !lancamentoRetirado(l));
 
 // Devolve {erros, linha}: linha = pedido para o script (modo "editar") com as entradas mensais
 // e as condições de pagamento sincronizadas com o contrato/adendas, como o VBA faz ao gravar.
 export function prepararRecalculoLancamento({original, funcionario, adendas = [], parametros = [], ano, mes, utilizador = "", agora = new Date()}) {
   if (!original) return {erros: ["Lançamento não encontrado."]};
   if (lancamentoFinalizado(original)) return {erros: ["Este lançamento está Finalizado e não pode ser alterado."]};
+  if (lancamentoRetirado(original)) return {erros: ["Este lançamento está Retirado (sem contrato no período) e não pode ser alterado."]};
   if (!Number.isInteger(Number(ano)) || Number(ano) < 1900 || Number(ano) > 9999 ||
       !Number.isInteger(Number(mes)) || Number(mes) < 1 || Number(mes) > 12 || !periodoIgual(original, ano, mes))
     return {erros: ["O lançamento não pertence ao período seleccionado."]};
@@ -306,7 +311,7 @@ export function escaloesPresentes(lancamentos) {
 }
 export function filtrarFolha(lancamentos, ano, mes, {empresa = "", departamento = "", codigo = "", escalao = ""} = {}) {
   const todos = v => !texto(v) || igual(v, "TODOS");
-  return lancamentos.filter(l => periodoIgual(l, ano, mes) &&
+  return lancamentos.filter(l => periodoIgual(l, ano, mes) && !lancamentoRetirado(l) &&
     (todos(empresa) || igual(campo(l, "Empresa"), empresa)) &&
     (todos(departamento) || igual(campo(l, "Departamento"), departamento)) &&
     (!texto(codigo) || normalizarCodigo(campo(l, "Codigo")) === normalizarCodigo(codigo)) &&
@@ -335,7 +340,7 @@ export function relatorioComparativo(lancamentos, ano, mes) {
   const act = {ano: Number(ano), mes: Number(mes)}, ant = act.mes === 1 ? {ano: act.ano - 1, mes: 12} : {ano: act.ano, mes: act.mes - 1};
   const grupo = l => texto(campo(l, "Empresa")) + "|" + texto(campo(l, "Departamento"));
   const chave = l => chaveRH(campo(l, "Empresa"), campo(l, "Codigo"));
-  const rowsAnt = lancamentos.filter(l => periodoIgual(l, ant.ano, ant.mes)), rowsAct = lancamentos.filter(l => periodoIgual(l, act.ano, act.mes));
+  const rowsAnt = semRetirados(lancamentos.filter(l => periodoIgual(l, ant.ano, ant.mes))), rowsAct = semRetirados(lancamentos.filter(l => periodoIgual(l, act.ano, act.mes)));
   const porChaveAnt = new Map(rowsAnt.map(l => [chave(l), l])), porChaveAct = new Map(rowsAct.map(l => [chave(l), l]));
   const liq = l => n(campo(l, "Salario Liquido"));
   const grupos = new Map();

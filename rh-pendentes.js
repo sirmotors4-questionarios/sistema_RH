@@ -29,7 +29,8 @@ export function prepararPendentes({lancamentos, funcionarios, adendas, parametro
 
 // Sincronização do mês ao carregar: retira os Pendentes sem contrato no período, recalcula os restantes
 // Pendentes e introduz os colaboradores com contrato vigente que ainda não têm lançamento no mês.
-// Alterados e Finalizados nunca são retirados nem recalculados; se já não tiverem contrato, ficam em `aRever`.
+// Alterados e Finalizados sem contrato no período não são apagados nem recalculados: são marcados «Retirado»
+// (ficam no Excel como histórico, fora da folha e dos totais) — lista `aRever` (nome mantido por compatibilidade).
 export function prepararSincronizacao({lancamentos, lancamentosAnterior = [], funcionarios, adendas = [], parametros = [], ano, mes, utilizador = "", agora}) {
   const per = periodoFolha(Number(ano), Number(mes));
   const porChave = new Map();
@@ -44,6 +45,7 @@ export function prepararSincronizacao({lancamentos, lancamentosAnterior = [], fu
     const k = chaveRH(campo(l, 'Empresa'), campo(l, 'Codigo')), fs = porChave.get(k) || [];
     // Só se retira quando o cadastro é inequívoco e diz que não há contrato no período.
     const c = contagem.get(k) === 1 && fs.length === 1 ? contratoNoPeriodo(fs[0], adendas, per) : null;
+    if (String(campo(l, 'Estado do Lançamento')).trim().toUpperCase() === 'RETIRADO') continue; // já retirado
     if (!c || c.vigente) { ficam.push(l); continue; }
     const pendente = String(campo(l, 'Estado do Lançamento')).trim().toUpperCase() === 'PENDENTE';
     const item = {Empresa: String(campo(l, 'Empresa')).trim(), Codigo: normalizarCodigo(campo(l, 'Codigo')), chave: k,

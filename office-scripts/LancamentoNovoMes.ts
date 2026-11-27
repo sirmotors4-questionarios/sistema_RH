@@ -8,6 +8,8 @@
  * modo "finalizar" — marca todas as linhas do mês como Finalizado / Revisto = Sim.
  * Operações v3 no modo "editar" (envelope {__rh_operacao}), usadas pelo «Carregar mês»:
  *   retirar_pendentes      — apaga do mês as linhas indicadas, só se continuarem Pendentes no Excel;
+ *   marcar_retirados       — Alterados/Finalizados sem contrato no período: Estado do Lançamento = "Retirado",
+ *                            motivo acrescentado às Observações (a linha fica como histórico; não é apagada);
  *   introduzir_lancamentos — insere novas linhas num mês já existente (mesmas validações do "gravar").
  * Nunca escreve nas 11 colunas calculadas (PROTEGIDAS). Valida tudo antes de escrever.
  * Desempenho (limite de 120 s do Power Automate): cada leitura ao Excel é uma ida ao servidor; as escritas seguem
@@ -201,8 +203,38 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
   const envelope = pedido[0] ?? {};
   const operacao = String(envelope["__rh_operacao"] ?? "");
   if (r.modo === "editar" && operacao) {
-    if (pedido.length !== 1 || ["recalcular_pendentes", "repor_inicial", "retirar_pendentes"].indexOf(operacao) < 0) { r.erros.push("operação inválida"); return fim(); }
+    if (pedido.length !== 1 || ["recalcular_pendentes", "repor_inicial", "retirar_pendentes", "marcar_retirados"].indexOf(operacao) < 0) { r.erros.push("operação inválida"); return fim(); }
     if (idx("Estado do Lançamento") < 0) { r.erros.push("coluna Estado do Lançamento em falta"); return fim(); }
+    if (operacao === "marcar_retirados") {
+      const alvos = envelope["retirar"] as Record<string, unknown>[];
+      if (!Array.isArray(alvos) || !alvos.length || alvos.length > LIMITE_LINHAS) { r.erros.push("lista de lançamentos a retirar inválida"); return fim(); }
+      const estados = new Map<number, unknown>(), obs = new Map<number, unknown>(), vistosM = new Set<string>();
+      const obsCol = idx("Observações") >= 0 ? col("Observações") : [];
+      let ignoradasM = 0;
+      for (const a of alvos) {
+        if (!a || typeof a !== "object" || Array.isArray(a)) { r.erros.push("pedido de retirada inválido"); continue; }
+        const k = chave(a.Empresa, a.Codigo, ano, mes), ids = linhasPorChave.get(k) ?? [];
+        if (vistosM.has(k)) { r.erros.push("lançamento repetido no pedido: " + k); continue; }
+        vistosM.add(k);
+        if (ids.length !== 1) { r.erros.push("lançamento inexistente ou duplicado: " + k); continue; }
+        // Revalidar no Excel: só Alterado/Finalizado (Pendentes são apagados por retirar_pendentes).
+        const e0 = norm(estadoCol[ids[0]]);
+        if (e0 !== "ALTERADO" && e0 !== "FINALIZADO") { ignoradasM++; continue; }
+        const nota = "Retirado: " + String(a.motivo ?? "sem contrato no período").trim(), antes = String(obsCol[ids[0]] ?? "").trim();
+        estados.set(ids[0], "Retirado");
+        obs.set(ids[0], antes && antes.indexOf(nota) < 0 ? antes + " | " + nota : (antes || nota));
+      }
+      if (r.erros.length) return fim();
+      escreverColuna("Estado do Lançamento", estados);
+      escreverColuna("Observações", obs);
+      const igualM = (v: unknown) => new Map<number, unknown>(Array.from(estados.keys()).map(i => [i, v] as [number, unknown]));
+      if (!vazio(envelope["Data Ultima Alteracao"])) escreverColuna("Data Ultima Alteracao", igualM(envelope["Data Ultima Alteracao"]));
+      if (!vazio(envelope["Utilizador Alteracao"])) escreverColuna("Utilizador Alteracao", igualM(String(envelope["Utilizador Alteracao"])));
+      r.alteradas = estados.size;
+      r.linha = JSON.stringify({versao: 4, operacao, alteradas: estados.size, ignoradas: ignoradasM, linhas: []});
+      r.ok = true;
+      return fim();
+    }
     if (operacao === "retirar_pendentes") {
       const alvos = envelope["retirar"] as Record<string, unknown>[];
       if (!Array.isArray(alvos) || !alvos.length || alvos.length > LIMITE_LINHAS) { r.erros.push("lista de lançamentos a retirar inválida"); return fim(); }
@@ -326,7 +358,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     for (let i = 0; i < nLinhas; i++) if (Number(a[i]) === ano && norm(m[i]) === alvo) linhasMes.push(i);
     if (!linhasMes.length) { r.erros.push("não há lançamentos para este mês"); return fim(); }
     // Só os que ainda não estão Finalizados; cada coluna é escrita por blocos de linhas seguidas.
-    const mudar = linhasMes.filter(i => !finalizado(i));
+    const mudar = linhasMes.filter(i => !finalizado(i) && norm(estadoCol[i]) !== "RETIRADO");
     const igual = (v: unknown) => new Map<number, unknown>(mudar.map(i => [i, v] as [number, unknown]));
     escreverColuna("Estado do Lançamento", igual("Finalizado"));
     escreverColuna("Revisto", igual("Sim"));
@@ -347,6 +379,7 @@ function main(workbook: ExcelScript.Workbook, ano: number, mes: string, linhas: 
     if (encontradas.length > 1) { r.erros.push(`lançamento ${k} está repetido na tabela`); return fim(); }
     const i = encontradas[0];
     if (finalizado(i)) { r.erros.push("este lançamento está Finalizado e não pode ser alterado"); return fim(); }
+    if (norm(estadoCol[i]) === "RETIRADO") { r.erros.push("este lançamento está Retirado (sem contrato no período) e não pode ser alterado"); return fim(); }
     const campos = Object.keys(o).filter(p => CHAVE.indexOf(p) < 0);
     for (const p of campos) {
       if (EDITAVEIS.indexOf(p) < 0) r.erros.push(`coluna não editável: ${p}`);
