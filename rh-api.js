@@ -160,13 +160,12 @@ export async function gravarLancamento({ano, mes, mesNome, linha} = {}, deps = {
 
 // Operações v2/v3 passam no ramo existente lancamento_editar, sem mudar os parâmetros do script.
 // v2: recalcular_pendentes, repor_inicial. v3 (Carregar mês): retirar_pendentes, introduzir_lancamentos.
-const VERSAO_OPERACAO = {recalcular_pendentes: 2, repor_inicial: 2, retirar_pendentes: 3, introduzir_lancamentos: 3, marcar_retirados: 4};
+const VERSAO_OPERACAO = {recalcular_pendentes: 2, repor_inicial: 2, retirar_pendentes: 3, introduzir_lancamentos: 3, retirar_sem_contrato: 4};
 export async function operarLancamentos(operacao, {ano, mes, mesNome, atualizacoes, retirar, linhas, Empresa, Codigo, utilizador = ""}, deps = {}) {
   const versao = VERSAO_OPERACAO[operacao];
   if (!versao) throw new ApiError("Operação inválida.", 0, "RH_ACTION");
   const envelope = {__rh_operacao: operacao};
-  if (operacao === "retirar_pendentes") envelope.retirar = retirar;
-  else if (operacao === "marcar_retirados") Object.assign(envelope, {retirar, "Utilizador Alteracao": utilizador, "Data Ultima Alteracao": Date.now() / 86400000 + 25569});
+  if (operacao === "retirar_pendentes" || operacao === "retirar_sem_contrato") envelope.retirar = retirar;
   else if (operacao === "introduzir_lancamentos") envelope.linhas = linhas;
   else Object.assign(envelope, {Empresa, Codigo, atualizacoes, "Utilizador Alteracao": utilizador, "Data Ultima Alteracao": Date.now() / 86400000 + 25569});
   const body = await callApi('lancamento_editar', {...deps, params: {ano: Number(ano), mes: Number(mes), mesNome, linhas: [envelope]}});

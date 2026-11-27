@@ -530,9 +530,9 @@ $("load-month").addEventListener("click",async()=>{
    partes.push(x.alteradas+" retirado(s)");if(x.ignoradas)avisos.push(x.ignoradas+" não retirado(s) porque já não estavam Pendentes.");
   }
   if(marcar.length){
-   progresso.actualizar(3,"A marcar "+marcar.length+" lançamento(s) Alterado(s)/Finalizado(s) como Retirado…");
-   const x=await operarLancamentos("marcar_retirados",{ano,mes,mesNome:nomeMes,utilizador:sessao.email,retirar:marcar.map(({Empresa,Codigo,motivo})=>({Empresa,Codigo,motivo}))},transp);
-   partes.push(x.alteradas+" marcado(s) como Retirado");if(x.ignoradas)avisos.push(x.ignoradas+" não marcado(s): o estado no Excel já não era Alterado/Finalizado.");
+   progresso.actualizar(3,"A retirar "+marcar.length+" lançamento(s) Alterado(s)/Finalizado(s) sem contrato no período…");
+   const x=await operarLancamentos("retirar_sem_contrato",{ano,mes,mesNome:nomeMes,retirar:marcar.map(({Empresa,Codigo})=>({Empresa,Codigo}))},transp);
+   partes.push(x.alteradas+" Alterado(s)/Finalizado(s) retirado(s)");if(x.ignoradas)avisos.push(x.ignoradas+" não retirado(s): o estado no Excel mudou entretanto.");
   }
   let falhasRecalculo=[];
   if(r.atualizacoes.length){
